@@ -22,6 +22,8 @@ import authRoutes from "./routes/auth.js";
 import categoryRoutes from "./routes/categories.js";
 import vacationRoutes from "./routes/vacations.js";
 import passkeyRoutes from "./routes/passkeys.js";
+import meRoutes from "./routes/me.js";
+import emailVerifyRoutes from "./routes/email-verify.js";
 import { feedApi, tokensApi } from "./routes/ical.js";
 import pdfRoutes from "./routes/pdf.js";
 
@@ -60,9 +62,11 @@ app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/categories", categoryRoutes);
 app.route("/api/v1/vacations", vacationRoutes);
 app.route("/api/v1/passkeys", passkeyRoutes);
+app.route("/api/v1/me", meRoutes);
 app.route("/api/v1/ical-tokens", tokensApi);
 app.route("/api/v1/pdf", pdfRoutes);
 app.route("/ical", feedApi);
+app.route("/verify-email", emailVerifyRoutes);
 
 // API 404 fallback (the SPA handles non-/api 404s).
 app.all("/api/*", (c) => err(c, "NOT_FOUND", "API route not found."));

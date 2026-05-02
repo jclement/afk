@@ -14,6 +14,8 @@
  */
 
 import { Hono } from "hono";
+import { getCookie } from "hono/cookie";
+import type { Context } from "hono";
 import type { HonoVars } from "../types.js";
 import { isAuthSuppressed, requireAuth } from "../lib/auth.js";
 import { err, ok } from "../lib/responses.js";
@@ -39,11 +41,30 @@ import {
   updateCredentialCounter,
 } from "../lib/store.js";
 import {
+  SESSION_COOKIE,
   clearSessionCookie,
   createSession,
   destroySession,
+  getSession,
   setSessionCookie,
 } from "../lib/sessions.js";
+import type { User } from "../../shared/types.js";
+
+/**
+ * Soft session lookup — returns the authenticated user if the request has a
+ * valid session cookie, or null otherwise. Used by routes that allow both
+ * authenticated and unauthenticated callers (e.g. /register/start lets you
+ * create a brand-new account or, if signed in, add a passkey to your own).
+ */
+async function currentUserFromCookie(
+  c: Context<HonoVars>,
+): Promise<User | null> {
+  const token = getCookie(c, SESSION_COOKIE);
+  if (!token) return null;
+  const session = await getSession(c.env.DB, token);
+  if (!session) return null;
+  return await getUser(c.env.DB, session.user_id);
+}
 
 const auth = new Hono<HonoVars>();
 
@@ -112,18 +133,23 @@ auth.post("/register/start", async (c) => {
     return err(c, "VALIDATION_ERROR", "Display name is required (max 100 chars).");
   }
 
-  const total = await userCount(c.env.DB);
   const existing = await getUserByUsername(c.env.DB, username);
-
-  // Open registration to:
-  //   - first-run setup (no users at all)
-  //   - existing user adding a passkey to their own account
-  if (total > 0 && !existing) {
-    return err(
-      c,
-      "FORBIDDEN",
-      "Registration is closed on this deployment.",
-    );
+  // Open multi-user signup. Two cases:
+  //   - new username → create the user during /finish (first one becomes admin)
+  //   - existing username → only allowed if the requester is already signed
+  //     in as that user (i.e., adding another passkey to their own account).
+  //     This route doesn't run requireAuth, so we have to look up the session
+  //     ourselves. Without this guard, anyone who knew a username could attach
+  //     a new passkey to that account and impersonate them.
+  if (existing) {
+    const requester = await currentUserFromCookie(c);
+    if (!requester || requester.id !== existing.id) {
+      return err(
+        c,
+        "CONFLICT",
+        "That username is taken. Pick another.",
+      );
+    }
   }
 
   const excludeIds = existing

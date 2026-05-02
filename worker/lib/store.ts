@@ -266,7 +266,8 @@ export async function listVacationsInYear(
   const { results } = await db
     .prepare(
       `SELECT id, user_id, category_id, start_date, end_date, partial_amount,
-              public_desc, internal_desc, cancelled_at, created_at, updated_at
+              public_desc, internal_desc, cancelled_at, ical_sequence,
+              created_at, updated_at
        FROM vacations
        WHERE user_id = ?
          AND start_date <= ?
@@ -285,7 +286,8 @@ export async function listAllVacations(
   const { results } = await db
     .prepare(
       `SELECT id, user_id, category_id, start_date, end_date, partial_amount,
-              public_desc, internal_desc, cancelled_at, created_at, updated_at
+              public_desc, internal_desc, cancelled_at, ical_sequence,
+              created_at, updated_at
        FROM vacations
        WHERE user_id = ?
        ORDER BY start_date DESC, created_at DESC`,
@@ -303,7 +305,8 @@ export async function getVacation(
   return await db
     .prepare(
       `SELECT id, user_id, category_id, start_date, end_date, partial_amount,
-              public_desc, internal_desc, cancelled_at, created_at, updated_at
+              public_desc, internal_desc, cancelled_at, ical_sequence,
+              created_at, updated_at
        FROM vacations WHERE id = ? AND user_id = ?`,
     )
     .bind(id, userId)
@@ -373,7 +376,10 @@ export async function updateVacation(
       .first<{ id: string }>();
     if (!owns) throw new Error("Category not found.");
   }
-  const fields: string[] = ["updated_at = datetime('now')"];
+  const fields: string[] = [
+    "updated_at = datetime('now')",
+    "ical_sequence = ical_sequence + 1",
+  ];
   const vals: (string | number | null)[] = [];
   for (const [k, v] of Object.entries(patch)) {
     fields.push(`${k} = ?`);
@@ -398,7 +404,10 @@ export async function cancelVacation(
   if (!existing) return null;
   await db
     .prepare(
-      `UPDATE vacations SET cancelled_at = datetime('now'), updated_at = datetime('now')
+      `UPDATE vacations
+         SET cancelled_at = datetime('now'),
+             updated_at = datetime('now'),
+             ical_sequence = ical_sequence + 1
        WHERE id = ? AND user_id = ?`,
     )
     .bind(id, userId)
@@ -415,7 +424,10 @@ export async function uncancelVacation(
   if (!existing) return null;
   await db
     .prepare(
-      `UPDATE vacations SET cancelled_at = NULL, updated_at = datetime('now')
+      `UPDATE vacations
+         SET cancelled_at = NULL,
+             updated_at = datetime('now'),
+             ical_sequence = ical_sequence + 1
        WHERE id = ? AND user_id = ?`,
     )
     .bind(id, userId)

@@ -59,6 +59,40 @@ export function useLogout() {
 }
 
 // ---------------------------------------------------------------------------
+// Email + verification
+// ---------------------------------------------------------------------------
+
+export function useSetEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) =>
+      api<{ email: string; verified: boolean }>(`${API_BASE}/me/email`, {
+        method: "PATCH",
+        json: { email },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+  });
+}
+
+export function useResendEmailVerification() {
+  return useMutation({
+    mutationFn: () =>
+      api<{ email: string; verified: boolean }>(`${API_BASE}/me/email/resend`, {
+        method: "POST",
+      }),
+  });
+}
+
+export function useClearEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api(`${API_BASE}/me/email`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Categories
 // ---------------------------------------------------------------------------
 

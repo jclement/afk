@@ -31,14 +31,18 @@ function RootComponent() {
   useEffect(() => {
     if (!status.data || me.isLoading) return;
     if (onPublicRoute) return;
+    // First-ever visitor (no users yet) lands on the create-account screen.
     if (!status.data.has_users && location.pathname !== "/setup") {
       navigate({ to: "/setup", replace: true });
       return;
     }
+    // Unauthenticated visitor on a protected route → send them to login.
+    // /setup is allowed for anyone wanting to create a new account.
     if (status.data.has_users && !me.data && !onAuthRoute) {
       navigate({ to: "/login", replace: true });
       return;
     }
+    // Already signed in → don't loiter on auth screens.
     if (me.data && onAuthRoute) {
       navigate({ to: "/", replace: true });
     }

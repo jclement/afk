@@ -24,7 +24,8 @@ import {
   validateVacationShape,
   vacationsInYear,
 } from "../../shared/vacation-math.js";
-import type { Allowance } from "../../shared/types.js";
+import { sendVacationLifecycleEmail } from "../lib/vacation-emails.js";
+import type { Allowance, Category } from "../../shared/types.js";
 
 const r = new Hono<HonoVars>();
 
@@ -136,6 +137,9 @@ r.post("/", async (c) => {
       public_desc,
       internal_desc,
     });
+    c.executionCtx.waitUntil(
+      mailVacation(c.env, new URL(c.req.url).origin, user, created, "created"),
+    );
     return ok(c, created, 201);
   } catch (e) {
     return err(c, "VALIDATION_ERROR", (e as Error).message);
@@ -188,6 +192,11 @@ r.patch("/:id", async (c) => {
         ? { internal_desc: body.internal_desc.slice(0, 1000) }
         : {}),
     });
+    if (updated) {
+      c.executionCtx.waitUntil(
+        mailVacation(c.env, new URL(c.req.url).origin, user, updated, "updated"),
+      );
+    }
     return ok(c, updated);
   } catch (e) {
     return err(c, "VALIDATION_ERROR", (e as Error).message);
@@ -199,6 +208,9 @@ r.post("/:id/cancel", async (c) => {
   const id = c.req.param("id");
   const updated = await cancelVacation(c.env.DB, user.id, id);
   if (!updated) return err(c, "NOT_FOUND", "Vacation not found.");
+  c.executionCtx.waitUntil(
+    mailVacation(c.env, new URL(c.req.url).origin, user, updated, "cancelled"),
+  );
   return ok(c, updated);
 });
 
@@ -207,15 +219,51 @@ r.post("/:id/uncancel", async (c) => {
   const id = c.req.param("id");
   const updated = await uncancelVacation(c.env.DB, user.id, id);
   if (!updated) return err(c, "NOT_FOUND", "Vacation not found.");
+  c.executionCtx.waitUntil(
+    mailVacation(c.env, new URL(c.req.url).origin, user, updated, "uncancelled"),
+  );
   return ok(c, updated);
 });
 
 r.delete("/:id", async (c) => {
   const user = authedUser(c);
   const id = c.req.param("id");
+  // Capture the row before deleting so we can email a CANCEL with the right
+  // UID + sequence. If it was already cancelled, the receiving calendar has
+  // already removed the event, so we skip the email.
+  const existing = await getVacation(c.env.DB, user.id, id);
   const ok2 = await deleteVacation(c.env.DB, user.id, id);
   if (!ok2) return err(c, "NOT_FOUND", "Vacation not found.");
+  if (existing && !existing.cancelled_at) {
+    c.executionCtx.waitUntil(
+      mailVacation(c.env, new URL(c.req.url).origin, user, existing, "deleted"),
+    );
+  }
   return ok(c, { deleted: true });
 });
+
+/**
+ * Look up the vacation's category and fan out to the email helper. Pulled
+ * up here so each route handler is a one-liner. Failures are swallowed by
+ * the helper; this wrapper just feeds it the right data.
+ */
+async function mailVacation(
+  env: import("../types.js").Env,
+  appOrigin: string,
+  user: import("../../shared/types.js").User,
+  vacation: import("../../shared/types.js").Vacation,
+  lifecycle:
+    | "created"
+    | "updated"
+    | "cancelled"
+    | "uncancelled"
+    | "deleted",
+): Promise<void> {
+  if (!user.email || !user.email_verified_at) return;
+  const cats = await listCategories(env.DB, user.id);
+  const category: Category | null =
+    cats.find((c) => c.id === vacation.category_id) ?? null;
+  await sendVacationLifecycleEmail(env, appOrigin, user, vacation, category, lifecycle);
+}
 
 export default r;

@@ -10,6 +10,8 @@ export interface User {
   username: string;
   display_name: string;
   role: "user" | "admin";
+  email: string | null;
+  email_verified_at: string | null;
 }
 
 export interface Category {
@@ -47,6 +49,8 @@ export interface Vacation {
   public_desc: string;
   internal_desc: string;
   cancelled_at: string | null;
+  /** Bumped on every change. Used as iCalendar SEQUENCE in invite emails. */
+  ical_sequence: number;
   created_at: string;
   updated_at: string;
 }

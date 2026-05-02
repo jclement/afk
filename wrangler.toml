@@ -25,7 +25,7 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # Worker handles API and iCal routes; asset lookup would otherwise serve the
 # SPA fallback for /api/* and break things like the PDF route.
-run_worker_first = ["/api/*", "/ical/*"]
+run_worker_first = ["/api/*", "/ical/*", "/verify-email/*"]
 
 [[env.test.d1_databases]]
 binding = "DB"
@@ -46,6 +46,10 @@ enabled = true
 [env.test.vars]
 RP_NAME = "AFK (test)"
 APP_VERSION = "dev"
+# MAILGUN_API_KEY is a secret — set with `wrangler secret put MAILGUN_API_KEY --env test`.
+MAILGUN_DOMAIN = "mg.onewheelgeek.net"
+MAILGUN_REGION = "us"
+MAILGUN_FROM = "AFK <afk@mg.onewheelgeek.net>"
 
 # ---------------------------------------------------------------------------
 # Production — afk.onewheelgeek.net.
@@ -63,7 +67,7 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # Worker handles API and iCal routes; asset lookup would otherwise serve the
 # SPA fallback for /api/* and break things like the PDF route.
-run_worker_first = ["/api/*", "/ical/*"]
+run_worker_first = ["/api/*", "/ical/*", "/verify-email/*"]
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -84,3 +88,7 @@ enabled = true
 [env.production.vars]
 RP_NAME = "AFK"
 APP_VERSION = "dev"
+# MAILGUN_API_KEY is a secret — set with `wrangler secret put MAILGUN_API_KEY --env production`.
+MAILGUN_DOMAIN = "mg.onewheelgeek.net"
+MAILGUN_REGION = "us"
+MAILGUN_FROM = "AFK <afk@mg.onewheelgeek.net>"

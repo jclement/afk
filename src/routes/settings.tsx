@@ -4,12 +4,13 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, KeyRound, Copy, Check } from "lucide-react";
+import { Plus, Trash2, KeyRound, Copy, Check, Mail } from "lucide-react";
 import {
   useAllowances,
   useCategories,
+  useClearEmail,
   useCreateCategory,
   useCreateICalToken,
   useDeleteCategory,
@@ -18,6 +19,8 @@ import {
   useICalTokens,
   usePasskeys,
   useRenamePasskey,
+  useResendEmailVerification,
+  useSetEmail,
   useUpdateCategory,
   useUpsertAllowance,
 } from "../api/hooks";
@@ -26,6 +29,9 @@ import { useMe } from "../api/hooks";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
+  validateSearch: (raw): { email?: string } => ({
+    email: typeof raw.email === "string" ? raw.email : undefined,
+  }),
 });
 
 function SettingsPage() {
@@ -33,10 +39,176 @@ function SettingsPage() {
   return (
     <div className="max-w-3xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col gap-6">
       <h1 className="text-base font-semibold text-heading">Settings</h1>
+      <EmailSection />
       <CategoriesSection year={year} />
       <PasskeysSection />
       <ICalSection />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Email — drives outgoing calendar invites for vacation lifecycle events
+// ---------------------------------------------------------------------------
+function EmailSection() {
+  const me = useMe();
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const setEmail = useSetEmail();
+  const resend = useResendEmailVerification();
+  const clear = useClearEmail();
+  const [draft, setDraft] = useState("");
+  const [banner, setBanner] = useState<
+    | { kind: "ok"; text: string }
+    | { kind: "warn"; text: string }
+    | { kind: "err"; text: string }
+    | null
+  >(null);
+
+  const current = me.data?.email ?? null;
+  const verified = !!me.data?.email_verified_at;
+
+  // The /verify-email/:token redirect sends the user back here with a query
+  // param — surface it as a banner. Setting state from a URL transition is
+  // intentional (the rule's preferred remount-via-key pattern doesn't fit a
+  // page-level banner that also reflects mutation results).
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (search.email === "verified") {
+      setBanner({ kind: "ok", text: "Email verified. You're all set." });
+    } else if (search.email === "invalid") {
+      setBanner({
+        kind: "err",
+        text: "That verification link was expired or invalid. Click 'Resend' below to get a new one.",
+      });
+    }
+    if (search.email) {
+      navigate({ search: {}, replace: true });
+    }
+  }, [search.email, navigate]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  function save() {
+    const email = draft.trim().toLowerCase();
+    if (!email) return;
+    setBanner(null);
+    setEmail.mutate(email, {
+      onSuccess: () => {
+        setDraft("");
+        setBanner({
+          kind: "warn",
+          text: `Verification email sent to ${email}. Click the link in your inbox to confirm — invites won't go out until then.`,
+        });
+      },
+      onError: (e) =>
+        setBanner({ kind: "err", text: (e as Error).message }),
+    });
+  }
+
+  function doResend() {
+    setBanner(null);
+    resend.mutate(undefined, {
+      onSuccess: (data) =>
+        setBanner({
+          kind: "warn",
+          text: `Verification email resent to ${data.email}.`,
+        }),
+      onError: (e) =>
+        setBanner({ kind: "err", text: (e as Error).message }),
+    });
+  }
+
+  function doClear() {
+    if (!confirm("Remove your email and stop receiving calendar invites?")) {
+      return;
+    }
+    clear.mutate(undefined, {
+      onSuccess: () =>
+        setBanner({ kind: "ok", text: "Email removed." }),
+    });
+  }
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <Mail className="w-4 h-4" /> Email &amp; calendar invites
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        We'll send you a calendar invite (.ics) for every vacation you book and
+        a cancellation when you cancel one. Works with Outlook, Gmail, Apple
+        Calendar — your client adds the event automatically.
+      </p>
+
+      {banner && (
+        <div
+          className={`text-sm mb-3 ${
+            banner.kind === "ok"
+              ? "text-[color:var(--color-success,#15803d)]"
+              : banner.kind === "warn"
+                ? "text-[color:var(--color-warning)]"
+                : "text-[color:var(--color-danger)]"
+          }`}
+        >
+          {banner.text}
+        </div>
+      )}
+
+      {current ? (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="text-sm font-mono text-heading">{current}</span>
+          {verified ? (
+            <span className="pill" style={{ backgroundColor: "#16a34a" }}>
+              verified
+            </span>
+          ) : (
+            <span className="pill" style={{ backgroundColor: "#b45309" }}>
+              pending
+            </span>
+          )}
+          {!verified && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={doResend}
+              disabled={resend.isPending}
+            >
+              Resend verification
+            </button>
+          )}
+          <button
+            type="button"
+            className="p-1 rounded hover:bg-hover text-[color:var(--color-danger)]"
+            onClick={doClear}
+            aria-label="Remove email"
+            title="Remove email"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="flex-1 min-w-[180px]">
+          <label className="label">{current ? "Change email" : "Email address"}</label>
+          <input
+            className="input"
+            type="email"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+          />
+        </div>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={save}
+          disabled={setEmail.isPending || !draft.trim()}
+        >
+          {current ? "Update" : "Add email"}
+        </button>
+      </div>
+    </section>
   );
 }
 

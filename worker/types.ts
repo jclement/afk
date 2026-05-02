@@ -21,6 +21,12 @@ export interface Env {
   APP_VERSION?: string;
   SESSION_SECRET?: string;
   SUPPRESS_AUTH?: string;
+  // Mailgun — empty key disables email sending (local dev / pre-config). The
+  // sendCalendarInvite helper checks this and returns { skipped: true }.
+  MAILGUN_API_KEY?: string;
+  MAILGUN_DOMAIN?: string;
+  MAILGUN_REGION?: string; // "us" (default) | "eu"
+  MAILGUN_FROM?: string;
 }
 
 // Cloudflare's Browser binding has a narrower type in the public types
@@ -37,6 +43,8 @@ export interface AuthContext {
     username: string;
     display_name: string;
     role: "user" | "admin";
+    email: string | null;
+    email_verified_at: string | null;
   };
   session_id: string | null; // null when SUPPRESS_AUTH is forging a dev user
 }

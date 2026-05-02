@@ -43,6 +43,7 @@ function v(partial: Partial<Vacation>): Vacation {
     public_desc: "",
     internal_desc: "",
     cancelled_at: null,
+    ical_sequence: 0,
     created_at: "2026-03-01",
     updated_at: "2026-03-01",
     ...partial,

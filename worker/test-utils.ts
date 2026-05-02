@@ -14,6 +14,8 @@ import { env as workerEnv } from "cloudflare:test";
 import migration0001 from "../migrations/0001_initial.sql?raw";
 // @ts-expect-error vite raw imports aren't part of the worker tsconfig
 import migration0002 from "../migrations/0002_accrues_drop_weeks.sql?raw";
+// @ts-expect-error vite raw imports aren't part of the worker tsconfig
+import migration0003 from "../migrations/0003_email_invites.sql?raw";
 import app from "./index.js";
 import type { Env } from "./types.js";
 import { createSession } from "./lib/sessions.js";
@@ -26,6 +28,7 @@ export { app };
 /** Fresh schema in the in-memory D1 instance — call from beforeEach. */
 export async function applyMigrations(): Promise<void> {
   const dropTables = [
+    "email_verifications",
     "ical_tokens",
     "vacations",
     "allowances",
@@ -41,7 +44,11 @@ export async function applyMigrations(): Promise<void> {
   // Strip BOTH leading-line and inline `--` comments before splitting on `;`,
   // collapse whitespace, then run each statement alone. D1's prepare() is
   // strict about a single statement per call.
-  for (const sql of [migration0001 as string, migration0002 as string]) {
+  for (const sql of [
+    migration0001 as string,
+    migration0002 as string,
+    migration0003 as string,
+  ]) {
     const cleaned = sql
       .split("\n")
       .map((l: string) => l.replace(/--.*$/, ""))

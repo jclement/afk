@@ -17,9 +17,14 @@ function AboutPage() {
 
       <section className="card p-4 flex flex-col gap-2 text-sm">
         <p>
-          AFK (Away From Keyboard) is a personal vacation tracker built for one
-          person — me — and shared with anyone who finds it useful. It's a
-          hobby project, not a SaaS.
+          AFK (Away From Keyboard) is a vacation tracker I built to scratch my
+          own itch and left open for anyone who finds it useful. It's a hobby
+          project, not a SaaS.
+        </p>
+        <p>
+          Anyone can sign up. Each account is fully isolated — your
+          categories, allowances, vacations, and calendar feeds belong to
+          you and only you.
         </p>
         <p>
           For contact, source, or anything else,{" "}
