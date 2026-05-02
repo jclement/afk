@@ -6,9 +6,7 @@
 import { describe, it, expect } from "vitest";
 import {
   businessDaysBetween,
-  categoryUnitToDays,
   categoryUsage,
-  daysToCategoryUnit,
   describeVacation,
   formatISODate,
   isBusinessDay,
@@ -17,6 +15,7 @@ import {
   vacationDayCost,
   vacationsInYear,
   validateVacationShape,
+  yearElapsedFraction,
 } from "./vacation-math";
 import type { Allowance, Category, Vacation } from "./types";
 
@@ -24,12 +23,14 @@ const cat: Category = {
   id: "cat1",
   user_id: "u",
   name: "Vacation",
-  unit: "days",
+  accrues: false,
   color: "#000",
   sort_order: 0,
   archived: false,
   created_at: "2026-01-01",
 };
+
+const accruingCat: Category = { ...cat, accrues: true };
 
 function v(partial: Partial<Vacation>): Vacation {
   return {
@@ -170,46 +171,92 @@ describe("validateVacationShape", () => {
   });
 });
 
-describe("daysToCategoryUnit / categoryUnitToDays", () => {
-  it("days unit is identity", () => {
-    expect(daysToCategoryUnit(5, "days")).toBe(5);
-    expect(categoryUnitToDays(5, "days")).toBe(5);
+describe("yearElapsedFraction", () => {
+  it("returns 0 before the year starts", () => {
+    expect(yearElapsedFraction(2026, new Date("2025-12-31T00:00:00Z"))).toBe(0);
   });
-  it("weeks divides by 5", () => {
-    expect(daysToCategoryUnit(10, "weeks")).toBe(2);
-    expect(categoryUnitToDays(2, "weeks")).toBe(10);
+  it("returns 1 after the year ends", () => {
+    expect(yearElapsedFraction(2026, new Date("2027-01-01T00:00:00Z"))).toBe(1);
+  });
+  it("is roughly half on July 2 (mid-year)", () => {
+    const f = yearElapsedFraction(2026, new Date("2026-07-02T12:00:00Z"));
+    expect(f).toBeGreaterThan(0.49);
+    expect(f).toBeLessThan(0.51);
   });
 });
 
 describe("categoryUsage", () => {
-  it("computes used / remaining / total", () => {
-    const allowance: Allowance = {
-      id: "a",
-      user_id: "u",
-      category_id: "cat1",
-      year: 2026,
-      days_allotted: 30, // 6 weeks
-      days_carryover: 2,
-      notes: null,
-    };
+  const baseAllowance: Allowance = {
+    id: "a",
+    user_id: "u",
+    category_id: "cat1",
+    year: 2026,
+    days_allotted: 30,
+    days_carryover: 2,
+    notes: null,
+  };
+
+  it("computes used / available / total / remaining for non-accruing", () => {
     const vacations: Vacation[] = [
-      v({ id: "v1", start_date: "2026-05-04", end_date: "2026-05-08" }), // 5 days
+      v({ id: "v1", start_date: "2026-05-04", end_date: "2026-05-08" }), // 5
       v({
         id: "v2",
         start_date: "2026-05-11",
         end_date: "2026-05-11",
         partial_amount: 0.5,
-      }), // 0.5 days
+      }), // 0.5
     ];
-    const r = categoryUsage(cat, allowance, vacations);
+    const r = categoryUsage(cat, baseAllowance, vacations, new Date("2026-06-01T00:00:00Z"));
     expect(r.used_days).toBe(5.5);
     expect(r.total_days).toBe(32);
+    expect(r.available_days).toBe(32); // non-accruing → fully available
     expect(r.remaining_days).toBe(26.5);
+    expect(r.over_accrual_days).toBe(0);
   });
+
+  it("prorates available_days for accruing categories", () => {
+    const r = categoryUsage(
+      accruingCat,
+      baseAllowance,
+      [],
+      new Date("2026-07-02T12:00:00Z"),
+      2026,
+    );
+    // ~half year elapsed → carryover (2) + 30 * ~0.5 = ~17, rounded to 0.25
+    expect(r.available_days).toBeGreaterThan(16);
+    expect(r.available_days).toBeLessThan(18);
+    expect(r.total_days).toBe(32);
+  });
+
+  it("flags over-accrual when used > available on accruing categories", () => {
+    const vacations: Vacation[] = [
+      v({ id: "v1", start_date: "2026-02-02", end_date: "2026-02-13" }), // 10 business days in early Feb
+    ];
+    const r = categoryUsage(
+      accruingCat,
+      baseAllowance,
+      vacations,
+      new Date("2026-02-15T00:00:00Z"),
+      2026,
+    );
+    // ~12% of year → carryover 2 + 30 * 0.12 ≈ 5.6, used = 10
+    expect(r.used_days).toBe(10);
+    expect(r.over_accrual_days).toBeGreaterThan(0);
+  });
+
+  it("non-accruing never reports over_accrual", () => {
+    const vacations: Vacation[] = [
+      v({ id: "v1", start_date: "2026-02-02", end_date: "2026-02-13" }),
+    ];
+    const r = categoryUsage(cat, baseAllowance, vacations, new Date("2026-02-15T00:00:00Z"));
+    expect(r.over_accrual_days).toBe(0);
+  });
+
   it("treats null allowance as zero total", () => {
     const r = categoryUsage(cat, null, []);
     expect(r.total_days).toBe(0);
     expect(r.remaining_days).toBe(0);
+    expect(r.available_days).toBe(0);
   });
 });
 

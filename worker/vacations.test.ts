@@ -5,7 +5,7 @@ async function setup() {
   const { cookie } = await createTestSession();
   const cat = await authedFetch(cookie, "/api/v1/categories", {
     method: "POST",
-    json: { name: "Vacation", unit: "weeks" },
+    json: { name: "Vacation", accrues: true },
   });
   const cBody = (await cat.json()) as { data: { id: string } };
   await authedFetch(
@@ -78,7 +78,7 @@ describe("vacations API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("supports cancel and delete with proper accounting", async () => {
+  it("supports cancel, uncancel, and delete with proper accounting", async () => {
     const { cookie, categoryId } = await setup();
     const create = await authedFetch(cookie, "/api/v1/vacations", {
       method: "POST",
@@ -98,11 +98,27 @@ describe("vacations API", () => {
     });
     expect(cancel.status).toBe(200);
 
-    const summary = await authedFetch(cookie, "/api/v1/vacations/summary/2026");
-    const body = (await summary.json()) as {
+    let summary = await authedFetch(cookie, "/api/v1/vacations/summary/2026");
+    let body = (await summary.json()) as {
       data: { categories: Array<{ used_days: number }> };
     };
     expect(body.data.categories[0]!.used_days).toBe(0);
+
+    // Restore — usage should come back.
+    const uncancel = await authedFetch(
+      cookie,
+      `/api/v1/vacations/${v.data.id}/uncancel`,
+      { method: "POST" },
+    );
+    expect(uncancel.status).toBe(200);
+    const restored = (await uncancel.json()) as { data: { cancelled_at: string | null } };
+    expect(restored.data.cancelled_at).toBeNull();
+
+    summary = await authedFetch(cookie, "/api/v1/vacations/summary/2026");
+    body = (await summary.json()) as {
+      data: { categories: Array<{ used_days: number }> };
+    };
+    expect(body.data.categories[0]!.used_days).toBe(5);
 
     const del = await authedFetch(cookie, `/api/v1/vacations/${v.data.id}`, {
       method: "DELETE",
@@ -116,7 +132,7 @@ describe("vacations API", () => {
 
     const cat = await authedFetch(userA.cookie, "/api/v1/categories", {
       method: "POST",
-      json: { name: "Vacation", unit: "days" },
+      json: { name: "Vacation" },
     });
     const cId = (await cat.json() as { data: { id: string } }).data.id;
     await authedFetch(userA.cookie, `/api/v1/categories/allowances/2026/${cId}`, {

@@ -15,6 +15,7 @@ import {
   listAllowances,
   listCategories,
   listVacationsInYear,
+  uncancelVacation,
   updateVacation,
   upsertAllowance,
 } from "../lib/store.js";
@@ -55,12 +56,15 @@ r.get("/summary/:year{[0-9]+}", async (c) => {
   }
 
   const visible = vacationsInYear(year, vacations);
+  const asOf = new Date();
   const summaries = cats.map((cat) => {
     const allowance = byCategory.get(cat.id)!;
     const usage = categoryUsage(
       cat,
       allowance,
       visible.filter((v) => v.category_id === cat.id),
+      asOf,
+      year,
     );
     return { category: cat, allowance, ...usage };
   });
@@ -194,6 +198,14 @@ r.post("/:id/cancel", async (c) => {
   const user = authedUser(c);
   const id = c.req.param("id");
   const updated = await cancelVacation(c.env.DB, user.id, id);
+  if (!updated) return err(c, "NOT_FOUND", "Vacation not found.");
+  return ok(c, updated);
+});
+
+r.post("/:id/uncancel", async (c) => {
+  const user = authedUser(c);
+  const id = c.req.param("id");
+  const updated = await uncancelVacation(c.env.DB, user.id, id);
   if (!updated) return err(c, "NOT_FOUND", "Vacation not found.");
   return ok(c, updated);
 });

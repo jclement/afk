@@ -13,7 +13,6 @@ import { CATEGORY_PALETTE, nextCategoryColor } from "../../shared/colors.js";
 import type {
   Allowance,
   Category,
-  CategoryUnit,
   ICalToken,
   PasskeyMeta,
   Vacation,
@@ -23,19 +22,28 @@ import type {
 // Categories
 // ---------------------------------------------------------------------------
 
+type CategoryRow = Omit<Category, "archived" | "accrues"> & {
+  archived: number;
+  accrues: number;
+};
+
+function rowToCategory(r: CategoryRow): Category {
+  return { ...r, archived: !!r.archived, accrues: !!r.accrues };
+}
+
 export async function listCategories(
   db: D1Database,
   userId: string,
 ): Promise<Category[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, user_id, name, unit, color, sort_order, archived, created_at
+      `SELECT id, user_id, name, accrues, color, sort_order, archived, created_at
        FROM categories WHERE user_id = ?
        ORDER BY archived ASC, sort_order ASC, name ASC`,
     )
     .bind(userId)
-    .all<Category>();
-  return (results ?? []).map((r) => ({ ...r, archived: !!r.archived }));
+    .all<CategoryRow>();
+  return (results ?? []).map(rowToCategory);
 }
 
 export async function createCategory(
@@ -43,7 +51,7 @@ export async function createCategory(
   userId: string,
   input: {
     name: string;
-    unit: CategoryUnit;
+    accrues?: boolean;
     color?: string;
     sort_order?: number;
   },
@@ -61,18 +69,19 @@ export async function createCategory(
     (existing.length === 0
       ? 0
       : Math.max(...existing.map((c) => c.sort_order)) + 1);
+  const accrues = input.accrues ? 1 : 0;
   await db
     .prepare(
-      `INSERT INTO categories (id, user_id, name, unit, color, sort_order)
+      `INSERT INTO categories (id, user_id, name, accrues, color, sort_order)
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, userId, input.name, input.unit, color, sortOrder)
+    .bind(id, userId, input.name, accrues, color, sortOrder)
     .run();
   return {
     id,
     user_id: userId,
     name: input.name,
-    unit: input.unit,
+    accrues: !!accrues,
     color,
     sort_order: sortOrder,
     archived: false,
@@ -84,7 +93,7 @@ export async function updateCategory(
   db: D1Database,
   userId: string,
   id: string,
-  patch: Partial<Pick<Category, "name" | "unit" | "color" | "archived" | "sort_order">>,
+  patch: Partial<Pick<Category, "name" | "accrues" | "color" | "archived" | "sort_order">>,
 ): Promise<Category | null> {
   const fields: string[] = [];
   const vals: (string | number | null)[] = [];
@@ -92,9 +101,9 @@ export async function updateCategory(
     fields.push("name = ?");
     vals.push(patch.name);
   }
-  if (patch.unit !== undefined) {
-    fields.push("unit = ?");
-    vals.push(patch.unit);
+  if (patch.accrues !== undefined) {
+    fields.push("accrues = ?");
+    vals.push(patch.accrues ? 1 : 0);
   }
   if (patch.color !== undefined) {
     fields.push("color = ?");
@@ -117,13 +126,13 @@ export async function updateCategory(
   await db.prepare(sql).bind(...vals).run();
   const row = await db
     .prepare(
-      `SELECT id, user_id, name, unit, color, sort_order, archived, created_at
+      `SELECT id, user_id, name, accrues, color, sort_order, archived, created_at
        FROM categories WHERE id = ? AND user_id = ?`,
     )
     .bind(id, userId)
-    .first<Category>();
+    .first<CategoryRow>();
   if (!row) return null;
-  return { ...row, archived: !!row.archived };
+  return rowToCategory(row);
 }
 
 export async function deleteCategory(
@@ -397,6 +406,23 @@ export async function cancelVacation(
   return await getVacation(db, userId, id);
 }
 
+export async function uncancelVacation(
+  db: D1Database,
+  userId: string,
+  id: string,
+): Promise<Vacation | null> {
+  const existing = await getVacation(db, userId, id);
+  if (!existing) return null;
+  await db
+    .prepare(
+      `UPDATE vacations SET cancelled_at = NULL, updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(id, userId)
+    .run();
+  return await getVacation(db, userId, id);
+}
+
 export async function deleteVacation(
   db: D1Database,
   userId: string,
@@ -627,13 +653,13 @@ export async function seedDefaultCategories(
 ): Promise<void> {
   await createCategory(db, userId, {
     name: "Vacation",
-    unit: "weeks",
+    accrues: true,
     color: CATEGORY_PALETTE[0]!,
     sort_order: 0,
   });
   await createCategory(db, userId, {
     name: "Flex",
-    unit: "days",
+    accrues: false,
     color: CATEGORY_PALETTE[1]!,
     sort_order: 1,
   });

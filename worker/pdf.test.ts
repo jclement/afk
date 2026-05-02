@@ -23,7 +23,7 @@ describe("PDF / print template", () => {
 
     const cat = await authedFetch(cookie, "/api/v1/categories", {
       method: "POST",
-      json: { name: "Vacation", unit: "weeks" },
+      json: { name: "Vacation", accrues: true },
     });
     const cId = ((await cat.json()) as { data: { id: string } }).data.id;
     await authedFetch(cookie, `/api/v1/categories/allowances/2026/${cId}`, {

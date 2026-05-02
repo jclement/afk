@@ -17,8 +17,7 @@
     "types": ["@cloudflare/workers-types/2023-07-01", "@cloudflare/vitest-pool-workers/types"],
     "paths": {
       "@shared/*": ["./shared/*"]
-    },
-    "baseUrl": "."
+    }
   },
   "include": ["worker", "shared"]
 }

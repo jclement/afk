@@ -6,8 +6,20 @@ node = "22"
 NODE_ENV = "development"
 
 [tasks.dev]
-description = "Run Vite + Worker dev server (Cloudflare vite plugin)"
-run = "npm run dev"
+description = "Run Vite + Worker dev server with auto-login (SUPPRESS_AUTH=true)"
+run = """
+#!/bin/bash
+set -e
+# Bootstrap .dev.vars on first run so passkeys are skipped and the worker
+# auto-logs in as a built-in developer user.
+if [ ! -f .dev.vars ]; then
+  cp .dev.vars.sample .dev.vars
+  echo "→ Created .dev.vars (SUPPRESS_AUTH=true). Edit it if you want to test the real auth flow."
+fi
+# Apply migrations to the local D1 — idempotent, skips already-applied ones.
+npx wrangler d1 migrations apply DB --env test --local
+CLOUDFLARE_ENV=test npm run dev
+"""
 
 [tasks.build]
 description = "Production build (Vite + Worker)"

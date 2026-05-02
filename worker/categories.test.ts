@@ -18,7 +18,7 @@ describe("categories API", () => {
 
     const created = await authedFetch(cookie, "/api/v1/categories", {
       method: "POST",
-      json: { name: "Vacation", unit: "weeks" },
+      json: { name: "Vacation", accrues: true },
     });
     expect(created.status).toBe(201);
     const c1 = await readJson<{ data: { id: string; color: string } }>(created);
@@ -36,7 +36,7 @@ describe("categories API", () => {
 
     const second = await authedFetch(cookie, "/api/v1/categories", {
       method: "POST",
-      json: { name: "Holiday", unit: "days" },
+      json: { name: "Holiday" },
     });
     expect(second.status).toBe(409);
 
@@ -46,16 +46,16 @@ describe("categories API", () => {
     expect(removed.status).toBe(200);
   });
 
-  it("rejects bad units and bad colors", async () => {
+  it("rejects bad colors and missing names", async () => {
     const { cookie } = await createTestSession();
     let res = await authedFetch(cookie, "/api/v1/categories", {
       method: "POST",
-      json: { name: "X", unit: "fortnight" },
+      json: { name: "" },
     });
     expect(res.status).toBe(400);
     res = await authedFetch(cookie, "/api/v1/categories", {
       method: "POST",
-      json: { name: "X", unit: "days", color: "red" },
+      json: { name: "X", color: "red" },
     });
     expect(res.status).toBe(400);
   });
@@ -64,7 +64,7 @@ describe("categories API", () => {
     const { cookie } = await createTestSession();
     const cat = await authedFetch(cookie, "/api/v1/categories", {
       method: "POST",
-      json: { name: "Vacation", unit: "weeks" },
+      json: { name: "Vacation", accrues: true },
     });
     const c = await readJson<{ data: { id: string } }>(cat);
 

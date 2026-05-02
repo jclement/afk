@@ -4,20 +4,18 @@
  * for a given year. Pure functions, no side effects, fully unit-tested.
  *
  * Conventions:
+ *   - All quantities are in business days. We don't track weeks or hours.
  *   - "business day" = Monday..Friday (we ignore public holidays for now;
  *     the user enters their own real-world entries and can split a block
  *     around statutory holidays if they care)
  *   - Dates are ISO `YYYY-MM-DD` strings parsed in UTC. Vacation is a
  *     date concept, not a wall-clock timestamp, so UTC keeps the arithmetic
  *     stable across time zones.
- *   - A category's "weeks" unit is purely cosmetic — 1 week = 5 business
- *     days for accounting.
  */
 
-import type { Allowance, Category, CategoryUnit, Vacation } from "./types.js";
+import type { Allowance, Category, Vacation } from "./types.js";
 
 const MS_PER_DAY = 86_400_000;
-export const DAYS_PER_WEEK = 5;
 
 /** Parse a `YYYY-MM-DD` string into a UTC Date. Throws on invalid input. */
 export function parseISODate(s: string): Date {
@@ -94,31 +92,59 @@ export function vacationDayCost(v: Pick<Vacation, "start_date" | "end_date" | "p
   return businessDaysBetween(v.start_date, v.end_date);
 }
 
-/** Convert days to whichever unit a category uses, for display. */
-export function daysToCategoryUnit(days: number, unit: CategoryUnit): number {
-  if (unit === "weeks") return days / DAYS_PER_WEEK;
-  return days;
+/**
+ * Fraction of the calendar year that has elapsed at `asOf`. Returns:
+ *   - 1 if `asOf` is in a year after `year`
+ *   - 0 if `asOf` is before `year` starts
+ *   - elapsed_days / year_days otherwise (uses calendar days, not business
+ *     days — accrual happens at HR's pace, not the work week's)
+ */
+export function yearElapsedFraction(year: number, asOf: Date = new Date()): number {
+  const yearStart = Date.UTC(year, 0, 1);
+  const yearEnd = Date.UTC(year + 1, 0, 1);
+  const t = asOf.getTime();
+  if (t <= yearStart) return 0;
+  if (t >= yearEnd) return 1;
+  return (t - yearStart) / (yearEnd - yearStart);
 }
 
-/** Convert a quantity in the category unit back to days. */
-export function categoryUnitToDays(value: number, unit: CategoryUnit): number {
-  if (unit === "weeks") return value * DAYS_PER_WEEK;
-  return value;
-}
-
-/** A category's used / remaining for a given list of vacations (already filtered to that category and year). */
+/**
+ * Compute used / available / total / remaining / over-accrual for a single
+ * category and its filtered list of vacations.
+ *
+ *   - `total_days` = allotted + carryover (the full year's pool)
+ *   - `available_days` = carryover + allotted × elapsed-fraction (accruing)
+ *                       or = total_days (non-accruing)
+ *   - `over_accrual_days` = max(0, used - available); only nonzero when
+ *     accruing and the user has dipped into days they haven't earned yet.
+ */
 export function categoryUsage(
-  _category: Category,
+  category: Pick<Category, "accrues">,
   allowance: Allowance | null,
   vacations: Vacation[],
-): { used_days: number; remaining_days: number; total_days: number } {
+  asOf: Date = new Date(),
+  year?: number,
+): {
+  used_days: number;
+  total_days: number;
+  available_days: number;
+  remaining_days: number;
+  over_accrual_days: number;
+} {
   const used = vacations.reduce((sum, v) => sum + vacationDayCost(v), 0);
-  const total =
-    (allowance?.days_allotted ?? 0) + (allowance?.days_carryover ?? 0);
+  const allotted = allowance?.days_allotted ?? 0;
+  const carryover = allowance?.days_carryover ?? 0;
+  const total = allotted + carryover;
+  const yr = year ?? allowance?.year ?? asOf.getUTCFullYear();
+  const fraction = category.accrues ? yearElapsedFraction(yr, asOf) : 1;
+  const available = carryover + allotted * fraction;
+  const overAccrual = category.accrues ? Math.max(0, used - available) : 0;
   return {
     used_days: roundDays(used),
-    remaining_days: roundDays(total - used),
     total_days: roundDays(total),
+    available_days: roundDays(available),
+    remaining_days: roundDays(total - used),
+    over_accrual_days: roundDays(overAccrual),
   };
 }
 

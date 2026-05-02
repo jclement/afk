@@ -72,7 +72,7 @@ export function useCategories() {
 export function useCreateCategory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; unit: "days" | "weeks" }) =>
+    mutationFn: (body: { name: string; accrues?: boolean }) =>
       api<Category>(`${API_BASE}/categories`, { method: "POST", json: body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
   });
@@ -188,6 +188,15 @@ export function useCancelVacation(year: number) {
   return useMutation({
     mutationFn: (id: string) =>
       api<Vacation>(`${API_BASE}/vacations/${id}/cancel`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
+  });
+}
+
+export function useUncancelVacation(year: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<Vacation>(`${API_BASE}/vacations/${id}/uncancel`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
   });
 }

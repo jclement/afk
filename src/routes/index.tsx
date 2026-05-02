@@ -9,6 +9,7 @@ import { ChevronLeft, ChevronRight, Plus, FileDown, Calendar } from "lucide-reac
 import {
   useCancelVacation,
   useDeleteVacation,
+  useUncancelVacation,
   useYearSummary,
 } from "../api/hooks";
 import { CategoryWidget } from "../components/CategoryWidget";
@@ -34,6 +35,7 @@ function DashboardPage() {
   const year = search.year ?? new Date().getFullYear();
   const summary = useYearSummary(year);
   const cancel = useCancelVacation(year);
+  const uncancel = useUncancelVacation(year);
   const del = useDeleteVacation(year);
 
   const [bookingOpen, setBookingOpen] = useState(false);
@@ -138,6 +140,7 @@ function DashboardPage() {
         <VacationList
           vacations={summary.data.vacations}
           onCancel={handleCancel}
+          onUncancel={(id) => uncancel.mutate(id)}
           onDelete={handleDelete}
           onEdit={(v) => {
             setEditing(v);

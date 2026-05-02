@@ -43,6 +43,11 @@ export function BookingModal({ open, year, editing, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    // Reset form fields when the modal opens. The lint rule prefers a
+    // remount-via-key pattern, but resetting state from a prop transition
+    // is fine here — the modal is closed when not in use, so this fires
+    // at most once per open/edit.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
     if (editing) {
       setCategoryId(editing.category_id);

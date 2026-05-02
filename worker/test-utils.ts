@@ -12,6 +12,8 @@ import { env as workerEnv } from "cloudflare:test";
 // the ambient module declaration below.
 // @ts-expect-error vite raw imports aren't part of the worker tsconfig
 import migration0001 from "../migrations/0001_initial.sql?raw";
+// @ts-expect-error vite raw imports aren't part of the worker tsconfig
+import migration0002 from "../migrations/0002_accrues_drop_weeks.sql?raw";
 import app from "./index.js";
 import type { Env } from "./types.js";
 import { createSession } from "./lib/sessions.js";
@@ -39,16 +41,18 @@ export async function applyMigrations(): Promise<void> {
   // Strip BOTH leading-line and inline `--` comments before splitting on `;`,
   // collapse whitespace, then run each statement alone. D1's prepare() is
   // strict about a single statement per call.
-  const cleaned = (migration0001 as string)
-    .split("\n")
-    .map((l: string) => l.replace(/--.*$/, ""))
-    .join("\n");
-  const stmts = cleaned
-    .split(";")
-    .map((s: string) => s.trim())
-    .filter((s: string) => s.length > 0);
-  for (const stmt of stmts) {
-    await env.DB.prepare(stmt).run();
+  for (const sql of [migration0001 as string, migration0002 as string]) {
+    const cleaned = sql
+      .split("\n")
+      .map((l: string) => l.replace(/--.*$/, ""))
+      .join("\n");
+    const stmts = cleaned
+      .split(";")
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0);
+    for (const stmt of stmts) {
+      await env.DB.prepare(stmt).run();
+    }
   }
 }
 

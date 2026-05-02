@@ -41,7 +41,9 @@ export async function registerPasskey(input: {
   try {
     response = await browserStartReg({ optionsJSON: start.options });
   } catch (e) {
-    throw new Error(`Could not register passkey: ${(e as Error).message}`);
+    throw new Error(`Could not register passkey: ${(e as Error).message}`, {
+      cause: e,
+    });
   }
   const finish = await api<{ user: User }>(
     `${API_BASE}/auth/register/finish`,
@@ -74,7 +76,9 @@ export async function loginWithPasskey(username?: string): Promise<User> {
   try {
     response = await browserStartAuth({ optionsJSON: start.options });
   } catch (e) {
-    throw new Error(`Could not authenticate: ${(e as Error).message}`);
+    throw new Error(`Could not authenticate: ${(e as Error).message}`, {
+      cause: e,
+    });
   }
   const finish = await api<{ user: User }>(`${API_BASE}/auth/login/finish`, {
     method: "POST",

@@ -14,7 +14,6 @@
 
 import {
   categoryUsage,
-  daysToCategoryUnit,
   describeVacation,
   parseISODate,
   vacationDayCost,
@@ -42,6 +41,7 @@ export function renderPrintHTML(data: PrintData): string {
     allowances.map((a) => [a.category_id, a]),
   );
   const visible = vacationsInYear(year, vacations);
+  const asOf = new Date();
   const summaries = categories
     .filter((c) => !c.archived)
     .map((cat) => {
@@ -50,6 +50,8 @@ export function renderPrintHTML(data: PrintData): string {
         cat,
         allowance,
         visible.filter((v) => v.category_id === cat.id),
+        asOf,
+        year,
       );
       return { cat, allowance, usage };
     });
@@ -90,13 +92,15 @@ export function renderPrintHTML(data: PrintData): string {
 
   const summaryRows = summaries
     .map(({ cat, usage }) => {
-      const used = daysToCategoryUnit(usage.used_days, cat.unit).toFixed(2).replace(/\.?0+$/, "");
-      const total = daysToCategoryUnit(usage.total_days, cat.unit).toFixed(2).replace(/\.?0+$/, "");
-      const remaining = daysToCategoryUnit(usage.remaining_days, cat.unit).toFixed(2).replace(/\.?0+$/, "");
+      const used = fmtDays(usage.used_days);
+      const available = fmtDays(usage.available_days);
+      const total = fmtDays(usage.total_days);
+      const remaining = fmtDays(usage.remaining_days);
       return `<tr>
         <td><span class="pill" style="background:${escapeHtml(cat.color)}">${escapeHtml(cat.name)}</span></td>
-        <td>${cat.unit}</td>
+        <td>${cat.accrues ? "accrues" : "up front"}</td>
         <td class="num">${used}</td>
+        <td class="num">${available}</td>
         <td class="num">${total}</td>
         <td class="num">${remaining}</td>
       </tr>`;
@@ -131,9 +135,9 @@ export function renderPrintHTML(data: PrintData): string {
   <div class="tag">${escapeHtml(tagline)}</div>
   <div class="meta">${escapeHtml(user.display_name)} (@${escapeHtml(user.username)}) · generated ${escapeHtml(new Date().toISOString().slice(0, 10))}</div>
 
-  <h2>Category summary</h2>
-  <table><thead><tr><th>Category</th><th>Unit</th><th>Used</th><th>Total</th><th>Remaining</th></tr></thead>
-  <tbody>${summaryRows || `<tr><td colspan="5">No categories defined.</td></tr>`}</tbody></table>
+  <h2>Category summary (days)</h2>
+  <table><thead><tr><th>Category</th><th>Accrual</th><th>Used</th><th>Available</th><th>Total</th><th>Remaining</th></tr></thead>
+  <tbody>${summaryRows || `<tr><td colspan="6">No categories defined.</td></tr>`}</tbody></table>
 
   <h2>Vacations</h2>
   ${detailSections || `<div>No vacations recorded for ${year}. Suspicious.</div>`}
@@ -143,6 +147,10 @@ export function renderPrintHTML(data: PrintData): string {
 }
 
 const TAGLINE_FOOTER = "Out of office, into PDF.";
+
+function fmtDays(n: number): string {
+  return n.toFixed(2).replace(/\.?0+$/, "");
+}
 
 function escapeHtml(s: string): string {
   return s

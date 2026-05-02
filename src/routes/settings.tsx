@@ -18,12 +18,11 @@ import {
   useICalTokens,
   usePasskeys,
   useRenamePasskey,
+  useUpdateCategory,
   useUpsertAllowance,
 } from "../api/hooks";
 import { registerPasskey } from "../lib/passkey-client";
 import { useMe } from "../api/hooks";
-import { categoryUnitToDays, daysToCategoryUnit } from "@shared/vacation-math";
-import type { CategoryUnit } from "@shared/types";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -48,16 +47,17 @@ function CategoriesSection({ year }: { year: number }) {
   const cats = useCategories();
   const allowances = useAllowances(year);
   const createCat = useCreateCategory();
+  const updateCat = useUpdateCategory();
   const deleteCat = useDeleteCategory();
   const upsert = useUpsertAllowance(year);
 
   const [name, setName] = useState("");
-  const [unit, setUnit] = useState<CategoryUnit>("weeks");
+  const [accrues, setAccrues] = useState(false);
 
   function add() {
     if (!name.trim()) return;
     createCat.mutate(
-      { name: name.trim(), unit },
+      { name: name.trim(), accrues },
       {
         onSuccess: () => setName(""),
       },
@@ -69,15 +69,19 @@ function CategoriesSection({ year }: { year: number }) {
       <h2 className="text-sm font-semibold text-heading mb-3">
         Categories &amp; allowances ({year})
       </h2>
+      <p className="text-xs text-subtle mb-3">
+        Everything is in days. Tick "accrues" if days_allotted is earned over
+        the year (carryover is always available up front).
+      </p>
       {cats.data && cats.data.length > 0 && (
         <div className="overflow-x-auto -mx-4 sm:mx-0">
           <table className="w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wide text-subtle">
               <tr>
                 <th className="px-3 py-1 text-left">Name</th>
-                <th className="px-3 py-1 text-left">Unit</th>
-                <th className="px-3 py-1 text-left">Allotted</th>
-                <th className="px-3 py-1 text-left">Carryover</th>
+                <th className="px-3 py-1 text-left">Accrues</th>
+                <th className="px-3 py-1 text-left">Allotted (d)</th>
+                <th className="px-3 py-1 text-left">Carryover (d)</th>
                 <th className="px-3 py-1 text-right">…</th>
               </tr>
             </thead>
@@ -87,19 +91,26 @@ function CategoriesSection({ year }: { year: number }) {
                   allowances.data?.find((al) => al.category_id === c.id) ?? null;
                 return (
                   <CategoryRow
-                    key={c.id}
+                    // Re-key when the allowance loads or its values change on
+                    // the server: CategoryRow's input state seeds from props
+                    // on mount only, so without a remount the rows stay
+                    // showing the "0" they captured before allowances loaded.
+                    key={`${c.id}:${a?.id ?? "pending"}:${a?.days_allotted ?? 0}:${a?.days_carryover ?? 0}`}
+                    id={c.id}
                     name={c.name}
-                    unit={c.unit}
+                    accrues={c.accrues}
                     color={c.color}
-                    archived={c.archived}
-                    allotted={daysToCategoryUnit(a?.days_allotted ?? 0, c.unit)}
-                    carryover={daysToCategoryUnit(a?.days_carryover ?? 0, c.unit)}
+                    allotted={a?.days_allotted ?? 0}
+                    carryover={a?.days_carryover ?? 0}
                     onSave={(allotted, carryover) =>
                       upsert.mutate({
                         category_id: c.id,
-                        days_allotted: categoryUnitToDays(allotted, c.unit),
-                        days_carryover: categoryUnitToDays(carryover, c.unit),
+                        days_allotted: allotted,
+                        days_carryover: carryover,
                       })
+                    }
+                    onToggleAccrues={(next) =>
+                      updateCat.mutate({ id: c.id, accrues: next })
                     }
                     onDelete={() => {
                       if (
@@ -127,17 +138,14 @@ function CategoriesSection({ year }: { year: number }) {
             placeholder="e.g. Sick"
           />
         </div>
-        <div>
-          <label className="label">Unit</label>
-          <select
-            className="select"
-            value={unit}
-            onChange={(e) => setUnit(e.target.value as CategoryUnit)}
-          >
-            <option value="weeks">Weeks</option>
-            <option value="days">Days</option>
-          </select>
-        </div>
+        <label className="flex items-center gap-2 text-sm pb-2">
+          <input
+            type="checkbox"
+            checked={accrues}
+            onChange={(e) => setAccrues(e.target.checked)}
+          />
+          Accrues
+        </label>
         <button type="button" className="btn btn-primary" onClick={add}>
           <Plus className="w-4 h-4" />
           Add
@@ -153,13 +161,14 @@ function CategoriesSection({ year }: { year: number }) {
 }
 
 interface RowProps {
+  id: string;
   name: string;
-  unit: CategoryUnit;
+  accrues: boolean;
   color: string;
-  archived: boolean;
   allotted: number;
   carryover: number;
   onSave: (allotted: number, carryover: number) => void;
+  onToggleAccrues: (next: boolean) => void;
   onDelete: () => void;
 }
 
@@ -175,7 +184,14 @@ function CategoryRow(p: RowProps) {
           {p.name}
         </span>
       </td>
-      <td className="px-3 py-2 text-xs text-subtle">{p.unit}</td>
+      <td className="px-3 py-2">
+        <input
+          type="checkbox"
+          checked={p.accrues}
+          onChange={(e) => p.onToggleAccrues(e.target.checked)}
+          aria-label={`Toggle accrual for ${p.name}`}
+        />
+      </td>
       <td className="px-3 py-2">
         <input
           type="number"

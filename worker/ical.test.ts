@@ -5,7 +5,7 @@ async function setup() {
   const { cookie, user } = await createTestSession({ username: "jeff", display_name: "Jeff" });
   const cat = await authedFetch(cookie, "/api/v1/categories", {
     method: "POST",
-    json: { name: "Vacation", unit: "weeks" },
+    json: { name: "Vacation", accrues: true },
   });
   const cBody = (await cat.json()) as { data: { id: string } };
   await authedFetch(

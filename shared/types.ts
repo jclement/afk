@@ -5,8 +5,6 @@
  * camelCase these — the API contract is "the database shape, escaped".
  */
 
-export type CategoryUnit = "days" | "weeks";
-
 export interface User {
   id: string;
   username: string;
@@ -18,7 +16,11 @@ export interface Category {
   id: string;
   user_id: string;
   name: string;
-  unit: CategoryUnit;
+  /**
+   * If true, days_allotted accrues throughout the year — `available_days`
+   * scales with the elapsed fraction. Carryover is always fully available.
+   */
+  accrues: boolean;
   color: string;
   sort_order: number;
   archived: boolean;
@@ -53,8 +55,27 @@ export interface CategorySummary {
   category: Category;
   allowance: Allowance;
   used_days: number;
-  remaining_days: number;
+  /**
+   * Allotted + carryover. The full year's worth of days, regardless of
+   * accrual. This is what shows up under "/ total".
+   */
   total_days: number;
+  /**
+   * What the user is *allowed* to use right now. For non-accruing categories
+   * this is `total_days`. For accruing ones it's
+   * `days_carryover + days_allotted * elapsed_fraction`.
+   */
+  available_days: number;
+  /**
+   * `total_days - used_days`. Can go negative if they overbook the year.
+   */
+  remaining_days: number;
+  /**
+   * `max(0, used_days - available_days)`. Non-zero on accruing categories
+   * means they've spent vacation they haven't accrued yet — used to drive
+   * the dashboard's "borrowing from future you" warning.
+   */
+  over_accrual_days: number;
 }
 
 export interface YearSummary {
