@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium",
-    "lint": "tsc -b --noEmit && eslint .",
+    "routes:generate": "tsr generate",
+    "lint": "npm run routes:generate && tsc -b --noEmit && eslint .",
     "fmt": "prettier -w . && eslint . --fix",
     "cf-typegen": "wrangler types ./worker/worker-configuration.d.ts"
   },
@@ -36,6 +37,7 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.0",
     "@tailwindcss/vite": "^4.2.0",
+    "@tanstack/router-cli": "^1.166.40",
     "@tanstack/router-plugin": "^1.167.0",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.0",
