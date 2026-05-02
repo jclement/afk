@@ -9,7 +9,7 @@ import type { User } from "../../shared/types.js";
 export const DEV_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 const SELECT_USER =
-  "SELECT id, username, display_name, role, email, email_verified_at FROM users";
+  "SELECT id, username, display_name, role, email, email_verified_at, timezone FROM users";
 
 export async function getUser(
   db: D1Database,
@@ -40,15 +40,21 @@ export async function userCount(db: D1Database): Promise<number> {
 
 export async function createUser(
   db: D1Database,
-  input: { username: string; display_name: string; role?: "user" | "admin" },
+  input: {
+    username: string;
+    display_name: string;
+    role?: "user" | "admin";
+    timezone?: string;
+  },
 ): Promise<User> {
   const id = newId();
   const role = input.role ?? "user";
+  const timezone = sanitiseTimezone(input.timezone) ?? "UTC";
   await db
     .prepare(
-      `INSERT INTO users (id, username, display_name, role) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO users (id, username, display_name, role, timezone) VALUES (?, ?, ?, ?, ?)`,
     )
-    .bind(id, input.username, input.display_name, role)
+    .bind(id, input.username, input.display_name, role, timezone)
     .run();
   return {
     id,
@@ -57,6 +63,7 @@ export async function createUser(
     role,
     email: null,
     email_verified_at: null,
+    timezone,
   };
 }
 
@@ -78,7 +85,43 @@ export async function ensureDevUser(db: D1Database): Promise<User> {
     role: "admin",
     email: null,
     email_verified_at: null,
+    timezone: "UTC",
   };
+}
+
+/**
+ * Update the user's IANA timezone. Validated against `Intl.supportedValuesOf`
+ * when available (modern Node/Workers), otherwise just length-bounded so we
+ * don't accept arbitrary garbage.
+ */
+export async function setUserTimezone(
+  db: D1Database,
+  userId: string,
+  timezone: string,
+): Promise<User | null> {
+  const sanitised = sanitiseTimezone(timezone);
+  if (!sanitised) throw new Error("Invalid timezone.");
+  await db
+    .prepare(`UPDATE users SET timezone = ? WHERE id = ?`)
+    .bind(sanitised, userId)
+    .run();
+  return getUser(db, userId);
+}
+
+function sanitiseTimezone(tz: string | undefined): string | null {
+  if (!tz) return null;
+  const trimmed = tz.trim();
+  if (!trimmed || trimmed.length > 64) return null;
+  // The IANA database spans Region/City segments — letters, digits,
+  // underscore, hyphen, slash, plus a couple of weirdos like GMT+02:00.
+  if (!/^[A-Za-z][A-Za-z0-9_+\-:/]*$/.test(trimmed)) return null;
+  // Round-trip through Intl to ensure the runtime actually recognises it.
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: trimmed });
+    return trimmed;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

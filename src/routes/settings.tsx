@@ -6,7 +6,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, KeyRound, Copy, Check, Mail } from "lucide-react";
+import { Plus, Trash2, KeyRound, Copy, Check, Mail, Globe } from "lucide-react";
 import {
   useAllowances,
   useCategories,
@@ -21,6 +21,7 @@ import {
   useRenamePasskey,
   useResendEmailVerification,
   useSetEmail,
+  useSetTimezone,
   useUpdateCategory,
   useUpsertAllowance,
 } from "../api/hooks";
@@ -39,12 +40,141 @@ function SettingsPage() {
   return (
     <div className="max-w-3xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col gap-6">
       <h1 className="text-base font-semibold text-heading">Settings</h1>
+      <TimezoneSection />
       <EmailSection />
       <CategoriesSection year={year} />
       <PasskeysSection />
       <ICalSection />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Timezone — drives "current year" / accrual fraction / today defaults
+// ---------------------------------------------------------------------------
+function TimezoneSection() {
+  const me = useMe();
+  const set = useSetTimezone();
+  const current = me.data?.timezone ?? "UTC";
+  const [draft, setDraft] = useState(current);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-sync the draft if the saved value changes underneath us (e.g. after
+  // a save round-trip).
+  if (current && draft === "UTC" && current !== "UTC") setDraft(current);
+
+  const browserTz = detectBrowserTimezone();
+  const dirty = draft.trim() !== current;
+
+  function save() {
+    setError(null);
+    set.mutate(draft.trim(), {
+      onError: (e) => setError((e as Error).message),
+    });
+  }
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <Globe className="w-4 h-4" /> Timezone
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        Used for "what year is it?" on the dashboard and for accrual progress
+        on accruing categories. IANA name (e.g. <code className="font-mono">{browserTz}</code>).
+      </p>
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="flex-1 min-w-[220px]">
+          <label className="label">Timezone</label>
+          <input
+            className="input font-mono"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            list="afk-tz-list"
+            placeholder="America/Vancouver"
+          />
+          <datalist id="afk-tz-list">
+            {commonTimezones().map((z) => (
+              <option key={z} value={z} />
+            ))}
+          </datalist>
+        </div>
+        {browserTz !== current && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setDraft(browserTz)}
+          >
+            Use browser ({browserTz})
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={save}
+          disabled={!dirty || set.isPending}
+        >
+          Save
+        </button>
+      </div>
+      {error && (
+        <div className="text-sm text-[color:var(--color-danger)] mt-2">
+          {error}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/**
+ * `Intl.supportedValuesOf("timeZone")` is the right answer when available
+ * (Node ≥18, modern browsers), but it returns ~600 zones — way too many for
+ * a sensible dropdown. We just feed a curated short list into <datalist> for
+ * autocomplete and let the input accept anything Intl will round-trip.
+ */
+function commonTimezones(): string[] {
+  return [
+    "UTC",
+    "America/Vancouver",
+    "America/Los_Angeles",
+    "America/Denver",
+    "America/Edmonton",
+    "America/Chicago",
+    "America/Toronto",
+    "America/New_York",
+    "America/Halifax",
+    "America/St_Johns",
+    "America/Sao_Paulo",
+    "Europe/London",
+    "Europe/Dublin",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Amsterdam",
+    "Europe/Madrid",
+    "Europe/Rome",
+    "Europe/Stockholm",
+    "Europe/Athens",
+    "Africa/Cairo",
+    "Africa/Johannesburg",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Bangkok",
+    "Asia/Singapore",
+    "Asia/Hong_Kong",
+    "Asia/Tokyo",
+    "Asia/Seoul",
+    "Australia/Perth",
+    "Australia/Adelaide",
+    "Australia/Sydney",
+    "Pacific/Auckland",
+  ];
 }
 
 // ---------------------------------------------------------------------------

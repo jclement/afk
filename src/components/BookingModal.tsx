@@ -9,9 +9,10 @@ import { Modal } from "./Modal";
 import {
   useCategories,
   useCreateVacation,
+  useMe,
   useUpdateVacation,
 } from "../api/hooks";
-import { validateVacationShape } from "@shared/vacation-math";
+import { todayInTimezone, validateVacationShape } from "@shared/vacation-math";
 import type { Vacation } from "@shared/types";
 
 interface Props {
@@ -30,6 +31,7 @@ const PARTIAL_OPTIONS: Array<{ value: number; label: string }> = [
 
 export function BookingModal({ open, year, editing, onClose }: Props) {
   const cats = useCategories();
+  const me = useMe();
   const create = useCreateVacation(year);
   const update = useUpdateVacation(year);
 
@@ -57,7 +59,7 @@ export function BookingModal({ open, year, editing, onClose }: Props) {
       setPublicDesc(editing.public_desc);
       setInternalDesc(editing.internal_desc);
     } else {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayInTimezone(me.data?.timezone ?? "UTC");
       setCategoryId(cats.data?.[0]?.id ?? "");
       setStartDate(today);
       setEndDate(today);
@@ -65,7 +67,7 @@ export function BookingModal({ open, year, editing, onClose }: Props) {
       setPublicDesc("");
       setInternalDesc("");
     }
-  }, [open, editing, cats.data]);
+  }, [open, editing, cats.data, me.data?.timezone]);
 
   // Single-day mode is implied when start === end. Partial only valid then.
   const sameDay = startDate === endDate;

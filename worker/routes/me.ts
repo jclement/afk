@@ -10,6 +10,7 @@ import { err, ok } from "../lib/responses.js";
 import {
   clearUserEmail,
   reissueEmailToken,
+  setUserTimezone,
   startEmailChange,
 } from "../lib/users.js";
 import { sendPlainEmail } from "../lib/mailgun.js";
@@ -70,6 +71,22 @@ r.delete("/email", async (c) => {
   const user = authedUser(c);
   await clearUserEmail(c.env.DB, user.id);
   return ok(c, { email: null, verified: false });
+});
+
+r.patch("/timezone", async (c) => {
+  const user = authedUser(c);
+  const body = await c.req
+    .json<{ timezone?: string }>()
+    .catch(() => ({}) as { timezone?: string });
+  const timezone = (body.timezone ?? "").trim();
+  if (!timezone) return err(c, "VALIDATION_ERROR", "timezone is required.");
+  try {
+    const updated = await setUserTimezone(c.env.DB, user.id, timezone);
+    if (!updated) return err(c, "NOT_FOUND", "User not found.");
+    return ok(c, { timezone: updated.timezone });
+  } catch (e) {
+    return err(c, "VALIDATION_ERROR", (e as Error).message);
+  }
 });
 
 async function sendVerificationEmail(

@@ -13,6 +13,7 @@ const user: User = {
   role: "user",
   email: "alice@example.com",
   email_verified_at: "2026-01-01",
+  timezone: "UTC",
 };
 
 const cat: Category = {

@@ -52,6 +52,7 @@ export function renderPrintHTML(data: PrintData): string {
         visible.filter((v) => v.category_id === cat.id),
         asOf,
         year,
+        user.timezone,
       );
       return { cat, allowance, usage };
     });

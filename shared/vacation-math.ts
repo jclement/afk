@@ -93,19 +93,88 @@ export function vacationDayCost(v: Pick<Vacation, "start_date" | "end_date" | "p
 }
 
 /**
- * Fraction of the calendar year that has elapsed at `asOf`. Returns:
- *   - 1 if `asOf` is in a year after `year`
- *   - 0 if `asOf` is before `year` starts
- *   - elapsed_days / year_days otherwise (uses calendar days, not business
- *     days — accrual happens at HR's pace, not the work week's)
+ * Today's date as `YYYY-MM-DD` in the given IANA timezone. Falls back to
+ * UTC if the runtime can't resolve the zone (shouldn't happen in modern
+ * browsers / Workers).
  */
-export function yearElapsedFraction(year: number, asOf: Date = new Date()): number {
-  const yearStart = Date.UTC(year, 0, 1);
-  const yearEnd = Date.UTC(year + 1, 0, 1);
-  const t = asOf.getTime();
-  if (t <= yearStart) return 0;
-  if (t >= yearEnd) return 1;
-  return (t - yearStart) / (yearEnd - yearStart);
+export function todayInTimezone(tz: string, asOf: Date = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(asOf);
+    const y = parts.find((p) => p.type === "year")!.value;
+    const m = parts.find((p) => p.type === "month")!.value;
+    const d = parts.find((p) => p.type === "day")!.value;
+    return `${y}-${m}-${d}`;
+  } catch {
+    return formatISODate(asOf);
+  }
+}
+
+/** Calendar year `asOf` falls into, in the given IANA timezone. */
+export function currentYearInTimezone(tz: string, asOf: Date = new Date()): number {
+  return Number(todayInTimezone(tz, asOf).slice(0, 4));
+}
+
+/**
+ * Fraction of the calendar year that has elapsed at `asOf`, evaluated in
+ * the user's `tz`. Returns:
+ *   - 1 if `asOf` (in tz) is in a year after `year`
+ *   - 0 if `asOf` (in tz) is before `year` starts
+ *   - else day-of-year + fraction-of-day, divided by year length
+ *
+ * `tz` defaults to UTC for callers that don't have a user context (tests,
+ * the print template's older signature).
+ */
+export function yearElapsedFraction(
+  year: number,
+  asOf: Date = new Date(),
+  tz: string = "UTC",
+): number {
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hour12: false,
+    }).formatToParts(asOf);
+  } catch {
+    return yearElapsedFraction(year, asOf, "UTC");
+  }
+  const get = (type: string) =>
+    Number(parts!.find((p) => p.type === type)!.value);
+  const localYear = get("year");
+  if (localYear < year) return 0;
+  if (localYear > year) return 1;
+  const month = get("month"); // 1..12
+  const day = get("day"); // 1..31
+  // Intl returns "24" for midnight in some zones via hour12:false; normalise.
+  const hour = get("hour") % 24;
+  const minute = get("minute");
+  const second = get("second");
+  const yearLength = isLeapYear(year) ? 366 : 365;
+  const dayOfYear = computeDayOfYear(year, month, day);
+  const fractionOfDay = (hour * 3600 + minute * 60 + second) / 86_400;
+  return (dayOfYear - 1 + fractionOfDay) / yearLength;
+}
+
+function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
+function computeDayOfYear(y: number, m: number, d: number): number {
+  const months = [31, isLeapYear(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  let total = 0;
+  for (let i = 0; i < m - 1; i++) total += months[i]!;
+  return total + d;
 }
 
 /**
@@ -124,6 +193,7 @@ export function categoryUsage(
   vacations: Vacation[],
   asOf: Date = new Date(),
   year?: number,
+  tz: string = "UTC",
 ): {
   used_days: number;
   total_days: number;
@@ -135,8 +205,8 @@ export function categoryUsage(
   const allotted = allowance?.days_allotted ?? 0;
   const carryover = allowance?.days_carryover ?? 0;
   const total = allotted + carryover;
-  const yr = year ?? allowance?.year ?? asOf.getUTCFullYear();
-  const fraction = category.accrues ? yearElapsedFraction(yr, asOf) : 1;
+  const yr = year ?? allowance?.year ?? currentYearInTimezone(tz, asOf);
+  const fraction = category.accrues ? yearElapsedFraction(yr, asOf, tz) : 1;
   const available = carryover + allotted * fraction;
   const overAccrual = category.accrues ? Math.max(0, used - available) : 0;
   return {

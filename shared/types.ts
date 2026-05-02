@@ -12,6 +12,8 @@ export interface User {
   role: "user" | "admin";
   email: string | null;
   email_verified_at: string | null;
+  /** IANA timezone name, e.g. "America/Vancouver". "UTC" if unset. */
+  timezone: string;
 }
 
 export interface Category {

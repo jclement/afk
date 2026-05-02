@@ -7,11 +7,13 @@ import { describe, it, expect } from "vitest";
 import {
   businessDaysBetween,
   categoryUsage,
+  currentYearInTimezone,
   describeVacation,
   formatISODate,
   isBusinessDay,
   parseISODate,
   roundDays,
+  todayInTimezone,
   vacationDayCost,
   vacationsInYear,
   validateVacationShape,
@@ -173,16 +175,47 @@ describe("validateVacationShape", () => {
 });
 
 describe("yearElapsedFraction", () => {
-  it("returns 0 before the year starts", () => {
+  it("returns 0 before the year starts (UTC)", () => {
     expect(yearElapsedFraction(2026, new Date("2025-12-31T00:00:00Z"))).toBe(0);
   });
-  it("returns 1 after the year ends", () => {
+  it("returns 1 after the year ends (UTC)", () => {
     expect(yearElapsedFraction(2026, new Date("2027-01-01T00:00:00Z"))).toBe(1);
   });
-  it("is roughly half on July 2 (mid-year)", () => {
+  it("is roughly half on July 2 mid-year (UTC)", () => {
     const f = yearElapsedFraction(2026, new Date("2026-07-02T12:00:00Z"));
     expect(f).toBeGreaterThan(0.49);
     expect(f).toBeLessThan(0.51);
+  });
+  it("respects per-user tz when crossing midnight", () => {
+    // Jan 1 04:00 UTC == Dec 31 20:00 in America/Vancouver (UTC-8) the day
+    // before. So in UTC the fraction is just past zero, but in Vancouver
+    // tz it's still last year (returns 1 because asOf > Vancouver-2026 has
+    // not yet started, but year=2025 returns 1 since 2025 has fully passed).
+    const asOf = new Date("2026-01-01T04:00:00Z");
+    expect(yearElapsedFraction(2026, asOf, "America/Vancouver")).toBe(0);
+    expect(yearElapsedFraction(2026, asOf, "UTC")).toBeGreaterThan(0);
+  });
+});
+
+describe("todayInTimezone", () => {
+  it("formats YYYY-MM-DD in the named tz", () => {
+    // Same instant: 04:00 UTC on Jan 1. In Vancouver tz that's still Dec 31.
+    const asOf = new Date("2026-01-01T04:00:00Z");
+    expect(todayInTimezone("UTC", asOf)).toBe("2026-01-01");
+    expect(todayInTimezone("America/Vancouver", asOf)).toBe("2025-12-31");
+    expect(todayInTimezone("Asia/Tokyo", asOf)).toBe("2026-01-01");
+  });
+  it("falls back to UTC when given an unknown tz", () => {
+    const asOf = new Date("2026-06-04T12:00:00Z");
+    expect(todayInTimezone("Atlantis/Lemuria", asOf)).toBe("2026-06-04");
+  });
+});
+
+describe("currentYearInTimezone", () => {
+  it("rolls earlier in westward zones", () => {
+    const asOf = new Date("2026-01-01T04:00:00Z");
+    expect(currentYearInTimezone("UTC", asOf)).toBe(2026);
+    expect(currentYearInTimezone("America/Vancouver", asOf)).toBe(2025);
   });
 });
 

@@ -66,6 +66,7 @@ r.get("/summary/:year{[0-9]+}", async (c) => {
       visible.filter((v) => v.category_id === cat.id),
       asOf,
       year,
+      user.timezone,
     );
     return { category: cat, allowance, ...usage };
   });

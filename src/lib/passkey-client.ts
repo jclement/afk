@@ -53,10 +53,22 @@ export async function registerPasskey(input: {
         flow_id: start.flow_id,
         response,
         nickname: input.nickname,
+        // Capture the browser's current IANA timezone on signup so the
+        // dashboard and accrual math start in the user's local frame
+        // without them having to find a settings page first.
+        timezone: detectBrowserTimezone(),
       },
     },
   );
   return finish.user;
+}
+
+function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 
 export async function loginWithPasskey(username?: string): Promise<User> {

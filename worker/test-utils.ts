@@ -16,6 +16,8 @@ import migration0001 from "../migrations/0001_initial.sql?raw";
 import migration0002 from "../migrations/0002_accrues_drop_weeks.sql?raw";
 // @ts-expect-error vite raw imports aren't part of the worker tsconfig
 import migration0003 from "../migrations/0003_email_invites.sql?raw";
+// @ts-expect-error vite raw imports aren't part of the worker tsconfig
+import migration0004 from "../migrations/0004_user_timezone.sql?raw";
 import app from "./index.js";
 import type { Env } from "./types.js";
 import { createSession } from "./lib/sessions.js";
@@ -48,6 +50,7 @@ export async function applyMigrations(): Promise<void> {
     migration0001 as string,
     migration0002 as string,
     migration0003 as string,
+    migration0004 as string,
   ]) {
     const cleaned = sql
       .split("\n")

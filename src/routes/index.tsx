@@ -9,9 +9,11 @@ import { ChevronLeft, ChevronRight, Plus, FileDown, Calendar } from "lucide-reac
 import {
   useCancelVacation,
   useDeleteVacation,
+  useMe,
   useUncancelVacation,
   useYearSummary,
 } from "../api/hooks";
+import { currentYearInTimezone } from "@shared/vacation-math";
 import { CategoryWidget } from "../components/CategoryWidget";
 import { VacationList } from "../components/VacationList";
 import { BookingModal } from "../components/BookingModal";
@@ -32,7 +34,9 @@ export const Route = createFileRoute("/")({
 function DashboardPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const year = search.year ?? new Date().getFullYear();
+  const me = useMe();
+  const tz = me.data?.timezone ?? "UTC";
+  const year = search.year ?? currentYearInTimezone(tz);
   const summary = useYearSummary(year);
   const cancel = useCancelVacation(year);
   const uncancel = useUncancelVacation(year);

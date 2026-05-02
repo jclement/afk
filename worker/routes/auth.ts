@@ -175,6 +175,7 @@ auth.post("/register/finish", async (c) => {
     flow_id?: string;
     response?: unknown;
     nickname?: string;
+    timezone?: string;
   }>();
   if (!body.flow_id || !body.response) {
     return err(c, "VALIDATION_ERROR", "Missing flow_id or response.");
@@ -197,6 +198,7 @@ auth.post("/register/finish", async (c) => {
       user = await createUser(c.env.DB, {
         username: result.username,
         display_name: result.display_name,
+        timezone: body.timezone,
         role,
       });
       isNewUser = true;

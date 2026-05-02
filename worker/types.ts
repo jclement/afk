@@ -45,6 +45,7 @@ export interface AuthContext {
     role: "user" | "admin";
     email: string | null;
     email_verified_at: string | null;
+    timezone: string;
   };
   session_id: string | null; // null when SUPPRESS_AUTH is forging a dev user
 }

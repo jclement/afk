@@ -92,6 +92,21 @@ export function useClearEmail() {
   });
 }
 
+export function useSetTimezone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (timezone: string) =>
+      api<{ timezone: string }>(`${API_BASE}/me/timezone`, {
+        method: "PATCH",
+        json: { timezone },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["auth", "me"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Categories
 // ---------------------------------------------------------------------------
