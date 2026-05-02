@@ -5,7 +5,13 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { applyMigrations, authedFetch, createTestSession, env, unauthedFetch } from "./test-utils.js";
+import {
+  applyMigrations,
+  authedFetch,
+  createTestSession,
+  env,
+  unauthedFetch,
+} from "./test-utils.js";
 
 describe("email + verification", () => {
   beforeEach(applyMigrations);
@@ -28,7 +34,9 @@ describe("email + verification", () => {
     expect(res.status).toBe(200);
 
     const me = await authedFetch(cookie, "/api/v1/auth/me");
-    const body = (await me.json()) as { data: { email: string | null; email_verified_at: string | null } };
+    const body = (await me.json()) as {
+      data: { email: string | null; email_verified_at: string | null };
+    };
     expect(body.data.email).toBe("alice@example.com");
     expect(body.data.email_verified_at).toBeNull();
   });
@@ -42,9 +50,7 @@ describe("email + verification", () => {
 
     // Pull the token directly out of D1 — the test bypass for "what would
     // have been emailed."
-    const row = await env.DB.prepare(
-      "SELECT token FROM email_verifications WHERE user_id = ?",
-    )
+    const row = await env.DB.prepare("SELECT token FROM email_verifications WHERE user_id = ?")
       .bind(user.id)
       .first<{ token: string }>();
     expect(row?.token).toBeTruthy();
@@ -76,9 +82,7 @@ describe("email + verification", () => {
       method: "PATCH",
       json: { email: "alice@example.com" },
     });
-    const first = await env.DB.prepare(
-      "SELECT token FROM email_verifications WHERE user_id = ?",
-    )
+    const first = await env.DB.prepare("SELECT token FROM email_verifications WHERE user_id = ?")
       .bind(user.id)
       .first<{ token: string }>();
     await unauthedFetch(`/verify-email/${first!.token}`, { redirect: "manual" });
@@ -161,19 +165,15 @@ describe("vacation invite plumbing", () => {
     const u = (await updated.json()) as { data: { ical_sequence: number } };
     expect(u.data.ical_sequence).toBe(1);
 
-    const cancelled = await authedFetch(
-      cookie,
-      `/api/v1/vacations/${v.data.id}/cancel`,
-      { method: "POST" },
-    );
+    const cancelled = await authedFetch(cookie, `/api/v1/vacations/${v.data.id}/cancel`, {
+      method: "POST",
+    });
     const cd = (await cancelled.json()) as { data: { ical_sequence: number } };
     expect(cd.data.ical_sequence).toBe(2);
 
-    const uncancelled = await authedFetch(
-      cookie,
-      `/api/v1/vacations/${v.data.id}/uncancel`,
-      { method: "POST" },
-    );
+    const uncancelled = await authedFetch(cookie, `/api/v1/vacations/${v.data.id}/uncancel`, {
+      method: "POST",
+    });
     const un = (await uncancelled.json()) as { data: { ical_sequence: number } };
     expect(un.data.ical_sequence).toBe(3);
   });

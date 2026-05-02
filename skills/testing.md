@@ -13,13 +13,13 @@ You are writing and running tests. **Every code change must be validated by runn
 
 ## What to Run (and When)
 
-| Changed | Run |
-|---------|-----|
-| Go code | `mise run test:api` then `mise run lint` |
-| Frontend code | `mise run test:ui` then `mise run lint` |
-| Both | `mise run test` then `mise run lint` |
-| User-visible behavior | All above + `mise run test:e2e` |
-| Any code before commit | `mise run lint && mise run test` |
+| Changed                | Run                                      |
+| ---------------------- | ---------------------------------------- |
+| Go code                | `mise run test:api` then `mise run lint` |
+| Frontend code          | `mise run test:ui` then `mise run lint`  |
+| Both                   | `mise run test` then `mise run lint`     |
+| User-visible behavior  | All above + `mise run test:e2e`          |
+| Any code before commit | `mise run lint && mise run test`         |
 
 ## Go Testing
 
@@ -89,6 +89,7 @@ mise exec -- go fmt ./...
 - `go fmt` is not optional — code must be formatted
 
 **If staticcheck is not installed:**
+
 ```toml
 # mise.toml
 [tools]
@@ -120,7 +121,11 @@ import { Modal } from "./Modal";
 
 test("closes when clicking Cancel", () => {
   const onClose = vi.fn();
-  render(<Modal open onClose={onClose}><p>Content</p></Modal>);
+  render(
+    <Modal open onClose={onClose}>
+      <p>Content</p>
+    </Modal>,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
   expect(onClose).toHaveBeenCalled();

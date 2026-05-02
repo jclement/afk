@@ -56,10 +56,7 @@ export function buildInviteIcs(opts: InviteOpts): string {
   const dtstart = vacation.start_date.replaceAll("-", "");
   const dtend = formatExclusiveEnd(vacation.end_date);
 
-  const headerLines = [
-    describeVacation(vacation),
-    `${vacationDayCost(vacation)} day(s) booked.`,
-  ];
+  const headerLines = [describeVacation(vacation), `${vacationDayCost(vacation)} day(s) booked.`];
   const notes = vacation.internal_desc?.trim() ?? "";
   const footer = `Booked via AFK · ${opts.appOrigin}`;
 
@@ -70,15 +67,15 @@ export function buildInviteIcs(opts: InviteOpts): string {
   const description = plainParts.join("\n");
 
   // HTML alternative for clients that honour X-ALT-DESC (Outlook does).
-  const headerHtml = headerLines
-    .map((line) => `<div>${escapeHtml(line)}</div>`)
-    .join("");
+  const headerHtml = headerLines.map((line) => `<div>${escapeHtml(line)}</div>`).join("");
   const notesHtml = notes ? renderMarkdown(notes) : "";
   const footerHtml = `<div style="color:#9ca3af;margin-top:12px">${escapeHtml(footer)}</div>`;
   const html =
     `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">` +
     headerHtml +
-    (notesHtml ? `<hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0"/>${notesHtml}` : "") +
+    (notesHtml
+      ? `<hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0"/>${notesHtml}`
+      : "") +
     footerHtml +
     `</div>`;
 
@@ -97,9 +94,7 @@ export function buildInviteIcs(opts: InviteOpts): string {
   lines.push(`DESCRIPTION:${escapeText(description)}`);
   // X-ALT-DESC is Outlook's hook for HTML-rendered descriptions. Other
   // clients ignore it harmlessly.
-  lines.push(
-    `X-ALT-DESC;FMTTYPE=text/html:${escapeText(html)}`,
-  );
+  lines.push(`X-ALT-DESC;FMTTYPE=text/html:${escapeText(html)}`);
   lines.push("TRANSP:OPAQUE");
   lines.push("X-MICROSOFT-CDO-BUSYSTATUS:OOF");
   lines.push("X-MICROSOFT-CDO-INTENDEDSTATUS:OOF");
@@ -150,26 +145,44 @@ function formatExclusiveEnd(endDate: string): string {
 }
 
 function escapeText(s: string): string {
-  // Per RFC 5545 §3.3.11.
+  // Per RFC 5545 §3.3.11. Order matters: backslash first so we don't
+  // double-escape what we just inserted. CR is normalised to LF first so a
+  // bare CR can't survive into the output and prematurely terminate a line.
   return s
     .replaceAll("\\", "\\\\")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
     .replaceAll(";", "\\;")
     .replaceAll(",", "\\,")
     .replaceAll("\n", "\\n");
 }
 
 function foldLines(lines: string[]): string[] {
+  // RFC 5545 §3.1: lines must be ≤75 octets (NOT chars) of UTF-8. Splitting
+  // by character index can land mid-codepoint and corrupt multibyte sequences
+  // (emoji, accented letters). Encode → fold byte-wise on codepoint
+  // boundaries → decode.
+  const enc = new TextEncoder();
+  const dec = new TextDecoder("utf-8");
   const out: string[] = [];
   for (const line of lines) {
-    if (line.length <= 75) {
+    const bytes = enc.encode(line);
+    if (bytes.length <= 75) {
       out.push(line);
       continue;
     }
-    out.push(line.slice(0, 75));
-    let i = 75;
-    while (i < line.length) {
-      out.push(" " + line.slice(i, i + 74));
-      i += 74;
+    let cursor = 0;
+    let first = true;
+    while (cursor < bytes.length) {
+      const limit = first ? 75 : 74;
+      let end = Math.min(cursor + limit, bytes.length);
+      // Walk back to a codepoint boundary: a UTF-8 continuation byte is
+      // 10xxxxxx (0x80–0xBF). Don't split a multi-byte sequence.
+      while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end -= 1;
+      const chunk = dec.decode(bytes.subarray(cursor, end));
+      out.push(first ? chunk : " " + chunk);
+      cursor = end;
+      first = false;
     }
   }
   return out;

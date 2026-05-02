@@ -40,6 +40,9 @@ id = "7cb07328927a4322b5c578a99bccfae1"
 [env.test.browser]
 binding = "BROWSER"
 
+[env.test.triggers]
+crons = ["0 4 * * *"] # daily 04:00 UTC — purge expired sessions/email tokens
+
 [env.test.observability.logs]
 enabled = true
 
@@ -81,6 +84,9 @@ id = "cba8636ecfc64b51888e6a25efb0db95"
 
 [env.production.browser]
 binding = "BROWSER"
+
+[env.production.triggers]
+crons = ["0 4 * * *"] # daily 04:00 UTC — purge expired sessions/email tokens
 
 [env.production.observability.logs]
 enabled = true

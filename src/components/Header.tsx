@@ -48,9 +48,7 @@ export function Header({ user }: { user: User }) {
       >
         <ThemeIcon className="w-4 h-4" />
       </button>
-      <div className="hidden sm:flex items-center text-xs text-gray-300 px-1">
-        @{user.username}
-      </div>
+      <div className="hidden sm:flex items-center text-xs text-gray-300 px-1">@{user.username}</div>
       <button
         type="button"
         onClick={() =>

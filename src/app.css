@@ -53,15 +53,33 @@
 /*  Utility classes                                                        */
 /* ---------------------------------------------------------------------- */
 @layer utilities {
-  .bg-surface { background-color: var(--color-surface); }
-  .bg-surface-alt { background-color: var(--color-surface-alt); }
-  .bg-hover { background-color: var(--color-hover); }
-  .bg-selected { background-color: var(--color-selected); }
-  .text-heading { color: var(--color-heading); }
-  .text-body { color: var(--color-body); }
-  .text-subtle { color: var(--color-subtle); }
-  .text-muted { color: var(--color-muted); }
-  .border-subtle { border-color: var(--color-border); }
+  .bg-surface {
+    background-color: var(--color-surface);
+  }
+  .bg-surface-alt {
+    background-color: var(--color-surface-alt);
+  }
+  .bg-hover {
+    background-color: var(--color-hover);
+  }
+  .bg-selected {
+    background-color: var(--color-selected);
+  }
+  .text-heading {
+    color: var(--color-heading);
+  }
+  .text-body {
+    color: var(--color-body);
+  }
+  .text-subtle {
+    color: var(--color-subtle);
+  }
+  .text-muted {
+    color: var(--color-muted);
+  }
+  .border-subtle {
+    border-color: var(--color-border);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -109,8 +127,12 @@
 
 /* Marquee animation for the header tagline */
 @keyframes marquee {
-  from { transform: translateX(0%); }
-  to { transform: translateX(-50%); }
+  from {
+    transform: translateX(0%);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }
 .marquee-track {
   animation: marquee 36s linear infinite;

@@ -16,11 +16,7 @@ import puppeteer from "@cloudflare/puppeteer";
 import type { HonoVars } from "../types.js";
 import { authedUser, requireAuth } from "../lib/auth.js";
 import { err } from "../lib/responses.js";
-import {
-  listAllowances,
-  listAllVacations,
-  listCategories,
-} from "../lib/store.js";
+import { listAllowances, listAllVacations, listCategories } from "../lib/store.js";
 import { renderPrintHTML } from "../lib/print-template.js";
 
 const r = new Hono<HonoVars>();
@@ -80,11 +76,7 @@ r.get("/:year{[0-9]+}", async (c) => {
     });
   } catch (e) {
     console.error("pdf rendering failed", e);
-    return err(
-      c,
-      "INTERNAL_ERROR",
-      `PDF rendering failed: ${(e as Error).message}`,
-    );
+    return err(c, "INTERNAL_ERROR", `PDF rendering failed: ${(e as Error).message}`);
   }
 });
 

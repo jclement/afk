@@ -14,6 +14,8 @@ import {
   startEmailChange,
 } from "../lib/users.js";
 import { sendPlainEmail } from "../lib/mailgun.js";
+import { listAllAllowances, listAllVacations, listCategories } from "../lib/store.js";
+import { buildJsonExport, buildVacationsCsv, exportFilename } from "../lib/export.js";
 
 const r = new Hono<HonoVars>();
 
@@ -21,9 +23,7 @@ r.use("*", requireAuth);
 
 r.patch("/email", async (c) => {
   const user = authedUser(c);
-  const body = await c.req
-    .json<{ email?: string }>()
-    .catch(() => ({}) as { email?: string });
+  const body = await c.req.json<{ email?: string }>().catch(() => ({}) as { email?: string });
   const email = (body.email ?? "").trim().toLowerCase();
   if (!email) return err(c, "VALIDATION_ERROR", "Email is required.");
 
@@ -48,20 +48,12 @@ r.post("/email/resend", async (c) => {
   const user = authedUser(c);
   const reissued = await reissueEmailToken(c.env.DB, user.id);
   if (!reissued) {
-    return err(
-      c,
-      "VALIDATION_ERROR",
-      "No pending verification — set or change your email first.",
-    );
+    return err(c, "VALIDATION_ERROR", "No pending verification — set or change your email first.");
   }
   const origin = new URL(c.req.url).origin;
   c.executionCtx.waitUntil(
-    sendVerificationEmail(c.env, origin, reissued.email, reissued.token).catch(
-      (e) =>
-        console.error(
-          "[me] verification resend failed:",
-          (e as Error).message,
-        ),
+    sendVerificationEmail(c.env, origin, reissued.email, reissued.token).catch((e) =>
+      console.error("[me] verification resend failed:", (e as Error).message),
     ),
   );
   return ok(c, { email: reissued.email, verified: false });
@@ -75,9 +67,7 @@ r.delete("/email", async (c) => {
 
 r.patch("/timezone", async (c) => {
   const user = authedUser(c);
-  const body = await c.req
-    .json<{ timezone?: string }>()
-    .catch(() => ({}) as { timezone?: string });
+  const body = await c.req.json<{ timezone?: string }>().catch(() => ({}) as { timezone?: string });
   const timezone = (body.timezone ?? "").trim();
   if (!timezone) return err(c, "VALIDATION_ERROR", "timezone is required.");
   try {
@@ -87,6 +77,53 @@ r.patch("/timezone", async (c) => {
   } catch (e) {
     return err(c, "VALIDATION_ERROR", (e as Error).message);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Data export — "give me everything you've got on me." Two formats:
+//   - export.json  → full machine-readable dump (every user-owned table)
+//   - export.csv   → flat vacations-with-category-info, spreadsheet-friendly
+//
+// Both endpoints serve only the requesting user's data (scoped via user.id
+// in every store call). See worker/lib/export.ts for the schema contract.
+// ---------------------------------------------------------------------------
+r.get("/export.json", async (c) => {
+  const user = authedUser(c);
+  const [categories, allowances, vacations] = await Promise.all([
+    listCategories(c.env.DB, user.id),
+    listAllAllowances(c.env.DB, user.id),
+    listAllVacations(c.env.DB, user.id),
+  ]);
+  const payload = buildJsonExport({
+    user,
+    categories,
+    allowances,
+    vacations,
+    appVersion: c.env.APP_VERSION ?? "dev",
+  });
+  return new Response(JSON.stringify(payload, null, 2), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${exportFilename(user.username, "json")}"`,
+      "Cache-Control": "no-store",
+    },
+  });
+});
+
+r.get("/export.csv", async (c) => {
+  const user = authedUser(c);
+  const [categories, vacations] = await Promise.all([
+    listCategories(c.env.DB, user.id),
+    listAllVacations(c.env.DB, user.id),
+  ]);
+  const csv = buildVacationsCsv({ categories, vacations });
+  return new Response(csv, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${exportFilename(user.username, "csv")}"`,
+      "Cache-Control": "no-store",
+    },
+  });
 });
 
 async function sendVerificationEmail(

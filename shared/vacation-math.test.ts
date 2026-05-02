@@ -15,6 +15,7 @@ import {
   roundDays,
   todayInTimezone,
   vacationDayCost,
+  vacationDayCostInYear,
   vacationsInYear,
   validateVacationShape,
   yearElapsedFraction,
@@ -112,23 +113,17 @@ describe("vacationDayCost", () => {
   });
   it("partial single day (half)", () => {
     expect(
-      vacationDayCost(
-        v({ start_date: "2026-05-04", end_date: "2026-05-04", partial_amount: 0.5 }),
-      ),
+      vacationDayCost(v({ start_date: "2026-05-04", end_date: "2026-05-04", partial_amount: 0.5 })),
     ).toBe(0.5);
   });
   it("partial on a weekend counts 0", () => {
     expect(
-      vacationDayCost(
-        v({ start_date: "2026-05-09", end_date: "2026-05-09", partial_amount: 0.5 }),
-      ),
+      vacationDayCost(v({ start_date: "2026-05-09", end_date: "2026-05-09", partial_amount: 0.5 })),
     ).toBe(0);
   });
   it("cancelled entry is 0", () => {
     expect(
-      vacationDayCost(
-        v({ start_date: "2026-05-04", end_date: "2026-05-08", cancelled_at: "x" }),
-      ),
+      vacationDayCost(v({ start_date: "2026-05-04", end_date: "2026-05-08", cancelled_at: "x" })),
     ).toBe(0);
   });
 });
@@ -136,41 +131,122 @@ describe("vacationDayCost", () => {
 describe("validateVacationShape", () => {
   it("rejects end-before-start", () => {
     expect(
-      validateVacationShape({ start_date: "2026-05-04", end_date: "2026-05-03", partial_amount: null }),
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-03",
+        partial_amount: null,
+      }),
     ).toMatch(/before/);
   });
   it("rejects partial on multi-day", () => {
     expect(
-      validateVacationShape({ start_date: "2026-05-04", end_date: "2026-05-05", partial_amount: 0.5 }),
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-05",
+        partial_amount: 0.5,
+      }),
     ).toMatch(/same day/);
   });
   it("rejects partial out of range", () => {
     expect(
-      validateVacationShape({ start_date: "2026-05-04", end_date: "2026-05-04", partial_amount: 0 }),
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: 0,
+      }),
     ).toMatch(/between/);
     expect(
-      validateVacationShape({ start_date: "2026-05-04", end_date: "2026-05-04", partial_amount: 1.5 }),
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: 1.5,
+      }),
     ).toMatch(/between/);
   });
   it("rejects partial on weekend", () => {
     expect(
-      validateVacationShape({ start_date: "2026-05-09", end_date: "2026-05-09", partial_amount: 0.5 }),
+      validateVacationShape({
+        start_date: "2026-05-09",
+        end_date: "2026-05-09",
+        partial_amount: 0.5,
+      }),
     ).toMatch(/business day/);
   });
   it("rejects range with no business days", () => {
     expect(
-      validateVacationShape({ start_date: "2026-05-09", end_date: "2026-05-10", partial_amount: null }),
+      validateVacationShape({
+        start_date: "2026-05-09",
+        end_date: "2026-05-10",
+        partial_amount: null,
+      }),
     ).toMatch(/no business days/);
   });
   it("accepts a normal week-long vacation", () => {
     expect(
-      validateVacationShape({ start_date: "2026-05-04", end_date: "2026-05-08", partial_amount: null }),
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-08",
+        partial_amount: null,
+      }),
     ).toBe(null);
   });
   it("accepts a half-day", () => {
     expect(
-      validateVacationShape({ start_date: "2026-05-04", end_date: "2026-05-04", partial_amount: 0.5 }),
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: 0.5,
+      }),
     ).toBe(null);
+  });
+  it("rejects NaN partial_amount", () => {
+    expect(
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: NaN,
+      }),
+    ).toMatch(/between/);
+  });
+  it("rejects Infinity partial_amount", () => {
+    expect(
+      validateVacationShape({
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: Infinity,
+      }),
+    ).toMatch(/between/);
+  });
+});
+
+describe("vacationDayCostInYear", () => {
+  it("clips a year-spanning entry to just the in-year portion", () => {
+    // Mon Dec 28 2026 → Mon Jan 4 2027 (6 business days total). Year 2026
+    // contains Dec 28-31 = 4 business days. Year 2027 contains Jan 1, 4 = 2
+    // business days. The full-cost vacationDayCost would be 6 in both years.
+    const v0: Vacation = v({ start_date: "2026-12-28", end_date: "2027-01-04" });
+    expect(vacationDayCost(v0)).toBe(6);
+    expect(vacationDayCostInYear(v0, 2026)).toBe(4);
+    expect(vacationDayCostInYear(v0, 2027)).toBe(2);
+  });
+  it("returns 0 for a year the entry doesn't touch", () => {
+    expect(
+      vacationDayCostInYear(v({ start_date: "2026-05-04", end_date: "2026-05-08" }), 2027),
+    ).toBe(0);
+  });
+  it("partial-day attributes to the start date's year", () => {
+    expect(
+      vacationDayCostInYear(
+        v({ start_date: "2026-05-04", end_date: "2026-05-04", partial_amount: 0.5 }),
+        2026,
+      ),
+    ).toBe(0.5);
+    expect(
+      vacationDayCostInYear(
+        v({ start_date: "2026-05-04", end_date: "2026-05-04", partial_amount: 0.5 }),
+        2025,
+      ),
+    ).toBe(0);
   });
 });
 
@@ -249,13 +325,7 @@ describe("categoryUsage", () => {
   });
 
   it("prorates available_days for accruing categories", () => {
-    const r = categoryUsage(
-      accruingCat,
-      baseAllowance,
-      [],
-      new Date("2026-07-02T12:00:00Z"),
-      2026,
-    );
+    const r = categoryUsage(accruingCat, baseAllowance, [], new Date("2026-07-02T12:00:00Z"), 2026);
     // ~half year elapsed → carryover (2) + 30 * ~0.5 = ~17, rounded to 0.25
     expect(r.available_days).toBeGreaterThan(16);
     expect(r.available_days).toBeLessThan(18);

@@ -12,11 +12,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { HonoVars } from "../types.js";
-import {
-  SESSION_COOKIE,
-  getSession,
-  touchSession,
-} from "./sessions.js";
+import { SESSION_COOKIE, getSession, touchSession } from "./sessions.js";
 import { ensureDevUser, getUser } from "./users.js";
 import { err } from "./responses.js";
 
@@ -27,9 +23,7 @@ export function isAuthSuppressed(env: { SUPPRESS_AUTH?: string }): boolean {
 /** Apply to all `/api/*` routes that require an authenticated user. */
 export const requireAuth: MiddlewareHandler<HonoVars> = async (c, next) => {
   if (isAuthSuppressed(c.env)) {
-    console.warn(
-      "⚠ SUPPRESS_AUTH=true — authentication disabled, auto-login as developer",
-    );
+    console.warn("⚠ SUPPRESS_AUTH=true — authentication disabled, auto-login as developer");
     const user = await ensureDevUser(c.env.DB);
     c.set("auth", { user, session_id: null });
     return next();

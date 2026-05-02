@@ -3,12 +3,30 @@
  * lives here so individual routes don't have to re-check the user.
  */
 
-import { Link, Outlet, createRootRouteWithContext, useLocation, useNavigate } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createRootRouteWithContext,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAuthStatus, useMe } from "../api/hooks";
 import { Header } from "../components/Header";
 import { pickTagline } from "@shared/taglines";
+
+// Per-route document.title hints. Routes not listed fall through to the
+// default title. We update document.title via useEffect so this stays
+// SPA-friendly without pulling in @tanstack/react-router's <head> plumbing.
+const TITLES: Record<string, string> = {
+  "/": "Dashboard · AFK",
+  "/login": "Sign in · AFK",
+  "/setup": "Set up your account · AFK",
+  "/welcome": "AFK — Away From Keyboard",
+  "/settings": "Settings · AFK",
+  "/about": "About & privacy · AFK",
+};
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -24,11 +42,14 @@ function RootComponent() {
   const status = useAuthStatus();
   const me = useMe();
 
+  useEffect(() => {
+    document.title = TITLES[location.pathname] ?? "AFK — Away From Keyboard";
+  }, [location.pathname]);
+
   const onAuthRoute = location.pathname === "/login" || location.pathname === "/setup";
   // Public routes — no auth, no auto-redirect away. /welcome is the marketing
   // landing page; /about is the privacy/no-guarantees page.
-  const onPublicRoute =
-    location.pathname === "/about" || location.pathname === "/welcome";
+  const onPublicRoute = location.pathname === "/about" || location.pathname === "/welcome";
 
   useEffect(() => {
     if (!status.data || me.isLoading) return;

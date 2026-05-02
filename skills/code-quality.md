@@ -5,6 +5,7 @@ You are writing code that **human Jeff** needs to understand, maintain, and modi
 ## The Readability Standard
 
 If Jeff opens a file he hasn't touched in six months, he should be able to understand:
+
 1. **What** this file does (top-of-file comment)
 2. **Why** non-obvious decisions were made (inline comments)
 3. **How** to modify it without breaking things (clear structure + tests)
@@ -16,6 +17,7 @@ If Jeff opens a file he hasn't touched in six months, he should be able to under
 Explain what this module does and why it exists. Not a restatement of the filename — actual context.
 
 **Go:**
+
 ```go
 // Package store provides the database access layer for the application.
 // All SQL queries live here — handlers never touch the database directly.
@@ -24,6 +26,7 @@ package store
 ```
 
 **TypeScript:**
+
 ```typescript
 /**
  * @module api/hooks
@@ -41,6 +44,7 @@ package store
 Files with multiple logical sections get dividers:
 
 **Go:**
+
 ```go
 // ---------------------------------------------------------------------------
 // User CRUD
@@ -57,6 +61,7 @@ func (s *Store) CreateSession(ctx context.Context, userId string) (string, error
 ```
 
 **TypeScript (route handlers):**
+
 ```typescript
 // ---------------------------------------------------------------------------
 // GET /api/v1/entities — list entities with their attributes for a project
@@ -70,6 +75,7 @@ func (s *Store) CreateSession(ctx context.Context, userId string) (string, error
 Describe what it does, not how. Include parameter meaning if not obvious from the name. Include return value semantics.
 
 **Go:**
+
 ```go
 // ValidateAPIKey checks the provided plaintext key against stored hashes.
 // Returns the associated user if the key is valid, not expired, and not revoked.
@@ -78,6 +84,7 @@ func ValidateAPIKey(plaintext string) (*User, error) {
 ```
 
 **TypeScript:**
+
 ```typescript
 /**
  * Create a new API key for the authenticated user.
@@ -93,7 +100,7 @@ export async function createAPIKey(name: string, scopes: string[], expiresAt?: D
 
 ### Internal Helpers — Comment When Non-Obvious
 
-Don't document trivial helpers. Do document anything where the *why* isn't clear from the code:
+Don't document trivial helpers. Do document anything where the _why_ isn't clear from the code:
 
 ```go
 // normalizeEmail lowercases and trims the email address. We also strip dots
@@ -141,19 +148,19 @@ createdAt := time.Now().Unix()
 
 These are fine — everything else should be spelled out:
 
-| Abbreviation | Meaning |
-|-------------|---------|
-| `id` | Identifier |
-| `db` | Database |
-| `ctx` | Context |
-| `req`, `res` | Request, Response |
-| `err` | Error |
-| `env` | Environment |
-| `config`, `cfg` | Configuration |
-| `fn` | Function (as a parameter) |
-| `tx` | Transaction |
-| `w`, `r` | http.ResponseWriter, *http.Request (Go convention) |
-| `t` | *testing.T (Go convention) |
+| Abbreviation    | Meaning                                             |
+| --------------- | --------------------------------------------------- |
+| `id`            | Identifier                                          |
+| `db`            | Database                                            |
+| `ctx`           | Context                                             |
+| `req`, `res`    | Request, Response                                   |
+| `err`           | Error                                               |
+| `env`           | Environment                                         |
+| `config`, `cfg` | Configuration                                       |
+| `fn`            | Function (as a parameter)                           |
+| `tx`            | Transaction                                         |
+| `w`, `r`        | http.ResponseWriter, \*http.Request (Go convention) |
+| `t`             | \*testing.T (Go convention)                         |
 
 ## Code Structure
 
@@ -234,6 +241,7 @@ return fmt.Errorf("applying migration %s: %w", filename, err)
 ```
 
 For user-facing errors, be helpful:
+
 ```
 "Email address is already registered. Try logging in instead."
 "API key has expired. Create a new one in Settings > API Keys."
@@ -266,7 +274,7 @@ type User struct {
 ## Code Review Checklist (Before Committing)
 
 1. Can Jeff understand each file's purpose from its top-of-file comment?
-2. Are non-obvious decisions explained with *why* comments?
+2. Are non-obvious decisions explained with _why_ comments?
 3. Are all exported functions/types documented?
 4. Are variable names descriptive (not abbreviated beyond the accepted list)?
 5. Are functions under ~40 lines? If not, can they be decomposed?

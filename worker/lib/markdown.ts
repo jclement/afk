@@ -58,8 +58,7 @@ const INLINE_STYLES: Record<string, string> = {
   ul: "margin:8px 0;padding-left:24px;list-style:disc",
   ol: "margin:8px 0;padding-left:24px;list-style:decimal",
   li: "margin:2px 0",
-  blockquote:
-    "margin:8px 0;padding:0 12px;border-left:3px solid #e5e7eb;color:#4b5563",
+  blockquote: "margin:8px 0;padding:0 12px;border-left:3px solid #e5e7eb;color:#4b5563",
   h1: "font-size:20px;font-weight:600;margin:16px 0 8px 0",
   h2: "font-size:18px;font-weight:600;margin:14px 0 6px 0",
   h3: "font-size:16px;font-weight:600;margin:12px 0 4px 0",

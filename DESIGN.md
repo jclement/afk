@@ -90,7 +90,7 @@ migrations/0001_initial.sql  — schema (run by Wrangler in CI, by helpers in te
    thinking. The Cloudflare Vite plugin makes this as ergonomic in dev as in prod.
 
 2. **D1 for everything except WebAuthn challenges.** Sessions, categories, and vacations all
-   benefit from durable, queryable storage. WebAuthn challenges are *intrinsically* short-lived
+   benefit from durable, queryable storage. WebAuthn challenges are _intrinsically_ short-lived
    (5 min) and tied to a one-shot flow id, so KV's TTL fits perfectly and we get automatic GC.
 
 3. **Server-side sessions, not JWTs.** The cookie carries a token; the row in `sessions` is the
@@ -100,7 +100,7 @@ migrations/0001_initial.sql  — schema (run by Wrangler in CI, by helpers in te
    vacations are scoped by `user_id` so an IDOR test (see `vacations.test.ts`) can prove
    isolation. If two people ever share a deployment, they're isolated by default.
 
-5. **Days are the unit of accounting.** Categories *display* in either days or weeks (1 week =
+5. **Days are the unit of accounting.** Categories _display_ in either days or weeks (1 week =
    5 business days). Allowances and used totals are stored in days. The conversion lives in
    `shared/vacation-math.ts` so the worker, the React app, and the PDF template all agree.
 
@@ -133,19 +133,20 @@ categories 1──* allowances
 categories 1──* vacations
 ```
 
-| Table | Purpose | Notable columns |
-|-------|---------|-----------------|
-| `users` | Account record | `username`, `display_name`, `role` |
-| `sessions` | Active sessions | `id` (token), `expires_at`, `last_seen_at` |
-| `credentials` | WebAuthn passkeys | `id` (cred id), `public_key`, `counter`, `transports`, `nickname` |
-| `categories` | User-defined categories | `unit` (`days`/`weeks`), `color`, `archived` |
-| `allowances` | Per-year, per-category budgets | `year`, `days_allotted`, `days_carryover` |
-| `vacations` | Entries | `start_date`, `end_date`, `partial_amount`, `cancelled_at` |
-| `ical_tokens` | Calendar feed tokens | `scope` (`private`/`public`), `label`, `last_used_at` |
+| Table         | Purpose                        | Notable columns                                                   |
+| ------------- | ------------------------------ | ----------------------------------------------------------------- |
+| `users`       | Account record                 | `username`, `display_name`, `role`                                |
+| `sessions`    | Active sessions                | `id` (token), `expires_at`, `last_seen_at`                        |
+| `credentials` | WebAuthn passkeys              | `id` (cred id), `public_key`, `counter`, `transports`, `nickname` |
+| `categories`  | User-defined categories        | `unit` (`days`/`weeks`), `color`, `archived`                      |
+| `allowances`  | Per-year, per-category budgets | `year`, `days_allotted`, `days_carryover`                         |
+| `vacations`   | Entries                        | `start_date`, `end_date`, `partial_amount`, `cancelled_at`        |
+| `ical_tokens` | Calendar feed tokens           | `scope` (`private`/`public`), `label`, `last_used_at`             |
 
 ## Authentication Flow
 
 ### First-run setup
+
 1. Browser hits `/api/v1/auth/status` and receives `has_users: false`.
 2. Frontend redirects to `/setup` and POSTs `{username, display_name}` to `/api/v1/auth/register/start`.
 3. Worker calls `generateRegistrationOptions` and stashes the challenge under a fresh `flow_id`
@@ -156,12 +157,14 @@ categories 1──* vacations
    a session, and sets the cookie.
 
 ### Subsequent login
+
 1. Browser POSTs optional `{username}` to `/login/start`. Worker returns assertion options.
 2. Browser invokes `navigator.credentials.get()`.
 3. Browser POSTs `{flow_id, response}` to `/login/finish`. Worker verifies, updates the
    credential's counter, creates a session, sets the cookie.
 
 ### SUPPRESS_AUTH
+
 When `SUPPRESS_AUTH=true` (only in dev), `requireAuth` short-circuits and forges a built-in
 admin user (`developer` / id `00000000-...`). Logs a warning every request so it's hard to ship
 this on by accident.

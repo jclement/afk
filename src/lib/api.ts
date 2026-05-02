@@ -16,10 +16,7 @@ export class APIError extends Error {
   }
 }
 
-export async function api<T>(
-  path: string,
-  init?: RequestInit & { json?: unknown },
-): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.json !== undefined) {
     headers.set("Content-Type", "application/json");
@@ -47,7 +44,7 @@ export async function api<T>(
       e?.error?.message ?? `Request failed (${res.status})`,
     );
   }
-  return ((parsed as ApiData<T> | null)?.data ?? (parsed as T));
+  return (parsed as ApiData<T> | null)?.data ?? (parsed as T);
 }
 
 export const API_BASE = "/api/v1";

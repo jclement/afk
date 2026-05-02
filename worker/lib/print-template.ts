@@ -20,12 +20,7 @@ import {
   vacationsInYear,
 } from "../../shared/vacation-math.js";
 import { pickTagline } from "../../shared/taglines.js";
-import type {
-  Allowance,
-  Category,
-  User,
-  Vacation,
-} from "../../shared/types.js";
+import type { Allowance, Category, User, Vacation } from "../../shared/types.js";
 
 interface PrintData {
   user: User;
@@ -37,9 +32,7 @@ interface PrintData {
 
 export function renderPrintHTML(data: PrintData): string {
   const { user, year, categories, allowances, vacations } = data;
-  const allowanceByCat = new Map<string, Allowance>(
-    allowances.map((a) => [a.category_id, a]),
-  );
+  const allowanceByCat = new Map<string, Allowance>(allowances.map((a) => [a.category_id, a]));
   const visible = vacationsInYear(year, vacations);
   const asOf = new Date();
   const summaries = categories

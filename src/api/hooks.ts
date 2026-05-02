@@ -86,8 +86,7 @@ export function useResendEmailVerification() {
 export function useClearEmail() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      api(`${API_BASE}/me/email`, { method: "DELETE" }),
+    mutationFn: () => api(`${API_BASE}/me/email`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
   });
 }
@@ -145,8 +144,7 @@ export function useUpdateCategory() {
 export function useDeleteCategory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api(`${API_BASE}/categories/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => api(`${API_BASE}/categories/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["categories"] });
       qc.invalidateQueries({ queryKey: ["summary"] });
@@ -161,8 +159,7 @@ export function useDeleteCategory() {
 export function useAllowances(year: number) {
   return useQuery({
     queryKey: ["allowances", year],
-    queryFn: () =>
-      api<Allowance[]>(`${API_BASE}/categories/allowances/${year}`),
+    queryFn: () => api<Allowance[]>(`${API_BASE}/categories/allowances/${year}`),
   });
 }
 
@@ -175,10 +172,10 @@ export function useUpsertAllowance(year: number) {
       days_carryover: number;
       notes?: string | null;
     }) =>
-      api<Allowance>(
-        `${API_BASE}/categories/allowances/${year}/${body.category_id}`,
-        { method: "PUT", json: body },
-      ),
+      api<Allowance>(`${API_BASE}/categories/allowances/${year}/${body.category_id}`, {
+        method: "PUT",
+        json: body,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["allowances", year] });
       qc.invalidateQueries({ queryKey: ["summary", year] });
@@ -199,8 +196,7 @@ export interface YearSummaryResponse {
 export function useYearSummary(year: number) {
   return useQuery({
     queryKey: ["summary", year],
-    queryFn: () =>
-      api<YearSummaryResponse>(`${API_BASE}/vacations/summary/${year}`),
+    queryFn: () => api<YearSummaryResponse>(`${API_BASE}/vacations/summary/${year}`),
   });
 }
 
@@ -214,8 +210,7 @@ export function useCreateVacation(year: number) {
       partial_amount: number | null;
       public_desc: string;
       internal_desc: string;
-    }) =>
-      api<Vacation>(`${API_BASE}/vacations`, { method: "POST", json: body }),
+    }) => api<Vacation>(`${API_BASE}/vacations`, { method: "POST", json: body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
   });
 }
@@ -253,8 +248,7 @@ export function useUncancelVacation(year: number) {
 export function useDeleteVacation(year: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api(`${API_BASE}/vacations/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => api(`${API_BASE}/vacations/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
   });
 }
@@ -273,8 +267,7 @@ export function usePasskeys() {
 export function useDeletePasskey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api(`${API_BASE}/passkeys/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => api(`${API_BASE}/passkeys/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["passkeys"] }),
   });
 }
@@ -317,8 +310,7 @@ export function useCreateICalToken() {
 export function useDeleteICalToken() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api(`${API_BASE}/ical-tokens/${id}`, { method: "DELETE" }),
+    mutationFn: (id: string) => api(`${API_BASE}/ical-tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ical-tokens"] }),
   });
 }

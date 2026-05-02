@@ -85,6 +85,45 @@ describe("buildInviteIcs", () => {
     expect(ics).toContain("UID:v1@afk");
   });
 
+  it("normalises stray CR to escaped LF so a bare CR can't terminate a line", () => {
+    const ics = buildInviteIcs({
+      user,
+      vacation: { ...vacation, public_desc: "first\rsecond" },
+      category: cat,
+      organizerEmail: "afk@mg.example.com",
+      method: "PUBLISH",
+      sequence: 0,
+      appOrigin: "https://afk.example.com",
+    });
+    const unfolded = ics.replaceAll("\r\n ", "");
+    expect(unfolded).toContain("first\\nsecond");
+    // SUMMARY should never contain a bare CR (which would split the line)
+    const summaryLine = unfolded.split("\r\n").find((l) => l.startsWith("SUMMARY:"))!;
+    expect(summaryLine.includes("\r")).toBe(false);
+  });
+
+  it("folds long lines on UTF-8 codepoint boundaries (no split emoji)", () => {
+    // 80 of the same multi-byte emoji forces a fold inside an emoji's bytes
+    // if foldLines uses .length instead of byte counting.
+    const emoji = "🌴";
+    const longDesc = emoji.repeat(80);
+    const ics = buildInviteIcs({
+      user,
+      vacation: { ...vacation, public_desc: longDesc },
+      category: cat,
+      organizerEmail: "afk@mg.example.com",
+      method: "PUBLISH",
+      sequence: 0,
+      appOrigin: "https://afk.example.com",
+    });
+    // The output must round-trip through UTF-8 decoding without producing
+    // U+FFFD replacement characters (which would mean a codepoint was split).
+    expect(ics.includes("�")).toBe(false);
+    // Each fold continuation should keep the content visible after unfolding.
+    const unfolded = ics.replaceAll("\r\n ", "");
+    expect(unfolded).toContain(emoji);
+  });
+
   it("escapes special characters in DESCRIPTION", () => {
     const ics = buildInviteIcs({
       user,

@@ -65,9 +65,7 @@ function LoginPage() {
             <KeyRound className="w-4 h-4" />
             {busy ? "Negotiating with your authenticator…" : "Sign in with passkey"}
           </button>
-          {error && (
-            <div className="text-sm text-[color:var(--color-danger)]">{error}</div>
-          )}
+          {error && <div className="text-sm text-[color:var(--color-danger)]">{error}</div>}
         </form>
 
         <div className="mt-5 pt-4 border-t border-subtle text-center text-sm">

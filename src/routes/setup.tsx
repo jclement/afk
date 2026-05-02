@@ -98,9 +98,7 @@ function SetupPage() {
             <ShieldCheck className="w-4 h-4" />
             {busy ? "Registering passkey…" : "Create account & register passkey"}
           </button>
-          {error && (
-            <div className="text-sm text-[color:var(--color-danger)]">{error}</div>
-          )}
+          {error && <div className="text-sm text-[color:var(--color-danger)]">{error}</div>}
         </form>
 
         <div className="mt-5 pt-4 border-t border-subtle text-center text-sm">
@@ -111,8 +109,8 @@ function SetupPage() {
         </div>
 
         <p className="text-xs text-muted mt-4">
-          Each account is private — categories, vacations, and feeds are
-          isolated to the user that created them. See{" "}
+          Each account is private — categories, vacations, and feeds are isolated to the user that
+          created them. See{" "}
           <Link to="/about" className="underline">
             about &amp; privacy
           </Link>{" "}

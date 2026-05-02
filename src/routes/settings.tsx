@@ -6,7 +6,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, KeyRound, Copy, Check, Mail, Globe } from "lucide-react";
+import { Plus, Trash2, KeyRound, Copy, Check, Mail, Globe, Download } from "lucide-react";
 import {
   useAllowances,
   useCategories,
@@ -27,6 +27,7 @@ import {
 } from "../api/hooks";
 import { registerPasskey } from "../lib/passkey-client";
 import { useMe } from "../api/hooks";
+import { currentYearInTimezone } from "../../shared/vacation-math";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -36,7 +37,11 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
-  const year = new Date().getFullYear();
+  const me = useMe();
+  // Use the user's configured timezone so the allowance editor shows the
+  // same "current year" as the dashboard. Browser-local year would diverge
+  // when the user's machine TZ differs from their AFK timezone.
+  const year = currentYearInTimezone(me.data?.timezone ?? "UTC");
   return (
     <div className="max-w-3xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col gap-6">
       <h1 className="text-base font-semibold text-heading">Settings</h1>
@@ -45,7 +50,43 @@ function SettingsPage() {
       <CategoriesSection year={year} />
       <PasskeysSection />
       <ICalSection />
+      <ExportSection />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Data export — "give me everything you've got on me"
+// ---------------------------------------------------------------------------
+function ExportSection() {
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <Download className="w-4 h-4" /> Export your data
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        Yours to take with you. JSON includes everything (profile, categories, allowances,
+        vacations). CSV is your vacation list flattened for spreadsheets, with computed day costs.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <a
+          className="btn btn-secondary inline-flex items-center justify-center gap-1.5 min-h-[40px]"
+          href="/api/v1/me/export.json"
+          download
+        >
+          <Download className="w-4 h-4" />
+          Download everything (JSON)
+        </a>
+        <a
+          className="btn btn-secondary inline-flex items-center justify-center gap-1.5 min-h-[40px]"
+          href="/api/v1/me/export.csv"
+          download
+        >
+          <Download className="w-4 h-4" />
+          Download vacations (CSV)
+        </a>
+      </div>
+    </section>
   );
 }
 
@@ -79,8 +120,8 @@ function TimezoneSection() {
         <Globe className="w-4 h-4" /> Timezone
       </h2>
       <p className="text-xs text-subtle mb-3">
-        Used for "what year is it?" on the dashboard and for accrual progress
-        on accruing categories. IANA name (e.g. <code className="font-mono">{browserTz}</code>).
+        Used for "what year is it?" on the dashboard and for accrual progress on accruing
+        categories. IANA name (e.g. <code className="font-mono">{browserTz}</code>).
       </p>
       <div className="flex flex-wrap gap-2 items-end">
         <div className="flex-1 min-w-[220px]">
@@ -99,11 +140,7 @@ function TimezoneSection() {
           </datalist>
         </div>
         {browserTz !== current && (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setDraft(browserTz)}
-          >
+          <button type="button" className="btn btn-secondary" onClick={() => setDraft(browserTz)}>
             Use browser ({browserTz})
           </button>
         )}
@@ -116,11 +153,7 @@ function TimezoneSection() {
           Save
         </button>
       </div>
-      {error && (
-        <div className="text-sm text-[color:var(--color-danger)] mt-2">
-          {error}
-        </div>
-      )}
+      {error && <div className="text-sm text-[color:var(--color-danger)] mt-2">{error}</div>}
     </section>
   );
 }
@@ -230,8 +263,7 @@ function EmailSection() {
           text: `Verification email sent to ${email}. Click the link in your inbox to confirm — invites won't go out until then.`,
         });
       },
-      onError: (e) =>
-        setBanner({ kind: "err", text: (e as Error).message }),
+      onError: (e) => setBanner({ kind: "err", text: (e as Error).message }),
     });
   }
 
@@ -243,8 +275,7 @@ function EmailSection() {
           kind: "warn",
           text: `Verification email resent to ${data.email}.`,
         }),
-      onError: (e) =>
-        setBanner({ kind: "err", text: (e as Error).message }),
+      onError: (e) => setBanner({ kind: "err", text: (e as Error).message }),
     });
   }
 
@@ -253,8 +284,7 @@ function EmailSection() {
       return;
     }
     clear.mutate(undefined, {
-      onSuccess: () =>
-        setBanner({ kind: "ok", text: "Email removed." }),
+      onSuccess: () => setBanner({ kind: "ok", text: "Email removed." }),
     });
   }
 
@@ -264,9 +294,9 @@ function EmailSection() {
         <Mail className="w-4 h-4" /> Email &amp; calendar invites
       </h2>
       <p className="text-xs text-subtle mb-3">
-        We'll send you a calendar invite (.ics) for every vacation you book and
-        a cancellation when you cancel one. Works with Outlook, Gmail, Apple
-        Calendar — your client adds the event automatically.
+        We'll send you a calendar invite (.ics) for every vacation you book and a cancellation when
+        you cancel one. Works with Outlook, Gmail, Apple Calendar — your client adds the event
+        automatically.
       </p>
 
       {banner && (
@@ -372,8 +402,8 @@ function CategoriesSection({ year }: { year: number }) {
         Categories &amp; allowances ({year})
       </h2>
       <p className="text-xs text-subtle mb-3">
-        Everything is in days. Tick "accrues" if days_allotted is earned over
-        the year (carryover is always available up front).
+        Everything is in days. Tick "accrues" if days_allotted is earned over the year (carryover is
+        always available up front).
       </p>
       {cats.data && cats.data.length > 0 && (
         <div className="overflow-x-auto -mx-4 sm:mx-0">
@@ -389,8 +419,7 @@ function CategoriesSection({ year }: { year: number }) {
             </thead>
             <tbody>
               {cats.data.map((c) => {
-                const a =
-                  allowances.data?.find((al) => al.category_id === c.id) ?? null;
+                const a = allowances.data?.find((al) => al.category_id === c.id) ?? null;
                 return (
                   <CategoryRow
                     // Re-key when the allowance loads or its values change on
@@ -411,9 +440,7 @@ function CategoriesSection({ year }: { year: number }) {
                         days_carryover: carryover,
                       })
                     }
-                    onToggleAccrues={(next) =>
-                      updateCat.mutate({ id: c.id, accrues: next })
-                    }
+                    onToggleAccrues={(next) => updateCat.mutate({ id: c.id, accrues: next })}
                     onDelete={() => {
                       if (
                         confirm(
@@ -441,11 +468,7 @@ function CategoriesSection({ year }: { year: number }) {
           />
         </div>
         <label className="flex items-center gap-2 text-sm pb-2">
-          <input
-            type="checkbox"
-            checked={accrues}
-            onChange={(e) => setAccrues(e.target.checked)}
-          />
+          <input type="checkbox" checked={accrues} onChange={(e) => setAccrues(e.target.checked)} />
           Accrues
         </label>
         <button type="button" className="btn btn-primary" onClick={add}>
@@ -477,8 +500,7 @@ interface RowProps {
 function CategoryRow(p: RowProps) {
   const [allotted, setAllotted] = useState<string>(p.allotted.toString());
   const [carryover, setCarryover] = useState<string>(p.carryover.toString());
-  const dirty =
-    Number(allotted) !== p.allotted || Number(carryover) !== p.carryover;
+  const dirty = Number(allotted) !== p.allotted || Number(carryover) !== p.carryover;
   return (
     <tr className="border-t border-subtle">
       <td className="px-3 py-2">
@@ -616,9 +638,7 @@ function PasskeysSection() {
         <Plus className="w-4 h-4" />
         {adding ? "Registering…" : "Add another passkey"}
       </button>
-      {error && (
-        <div className="text-sm text-[color:var(--color-danger)] mt-2">{error}</div>
-      )}
+      {error && <div className="text-sm text-[color:var(--color-danger)] mt-2">{error}</div>}
     </section>
   );
 }
@@ -643,9 +663,8 @@ function ICalSection() {
     <section className="card p-4">
       <h2 className="text-sm font-semibold text-heading mb-3">Calendar feeds (iCal)</h2>
       <p className="text-xs text-subtle mb-3">
-        Mint a feed URL and paste it into Outlook, Google Calendar, or Apple Calendar.
-        Public feeds expose only the public description; private feeds include internal notes
-        and category names.
+        Mint a feed URL and paste it into Outlook, Google Calendar, or Apple Calendar. Public feeds
+        expose only the public description; private feeds include internal notes and category names.
       </p>
       <div className="flex flex-col gap-2">
         {(tokens.data ?? []).map((t) => (
@@ -670,7 +689,11 @@ function ICalSection() {
                 onClick={() => copy(t.feed_url)}
                 title={t.feed_url}
               >
-                {copied === t.feed_url ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied === t.feed_url ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
                 {copied === t.feed_url ? "Copied" : "Copy URL"}
               </button>
               <button
@@ -702,10 +725,7 @@ function ICalSection() {
           type="button"
           className="btn btn-secondary"
           onClick={() =>
-            create.mutate(
-              { scope: "public", label },
-              { onSuccess: () => setLabel("") },
-            )
+            create.mutate({ scope: "public", label }, { onSuccess: () => setLabel("") })
           }
           disabled={create.isPending}
         >
@@ -716,10 +736,7 @@ function ICalSection() {
           type="button"
           className="btn btn-primary"
           onClick={() =>
-            create.mutate(
-              { scope: "private", label },
-              { onSuccess: () => setLabel("") },
-            )
+            create.mutate({ scope: "private", label }, { onSuccess: () => setLabel("") })
           }
           disabled={create.isPending}
         >

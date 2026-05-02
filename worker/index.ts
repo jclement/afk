@@ -14,9 +14,12 @@
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { logger } from "hono/logger";
+import { bodyLimit } from "hono/body-limit";
 
 import type { HonoVars } from "./types.js";
 import { err, ok } from "./lib/responses.js";
+import { purgeExpiredSessions } from "./lib/sessions.js";
+import { purgeExpiredEmailVerifications } from "./lib/users.js";
 
 import authRoutes from "./routes/auth.js";
 import categoryRoutes from "./routes/categories.js";
@@ -40,13 +43,48 @@ app.use(
       fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
       imgSrc: ["'self'", "data:"],
       connectSrc: ["'self'"],
+      manifestSrc: ["'self'"],
+      workerSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameSrc: ["'none'"],
       frameAncestors: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
     },
+    permissionsPolicy: {
+      // Disable browser features the app has no use for. Locks down the page
+      // so a future XSS or compromised dependency can't, e.g., grab the camera.
+      accelerometer: [],
+      camera: [],
+      geolocation: [],
+      gyroscope: [],
+      magnetometer: [],
+      microphone: [],
+      midi: [],
+      payment: [],
+      usb: [],
+    },
     referrerPolicy: "strict-origin-when-cross-origin",
+    strictTransportSecurity: "max-age=63072000; includeSubDomains; preload",
     xFrameOptions: "DENY",
     xContentTypeOptions: "nosniff",
+  }),
+);
+
+// Catch-all error handler so a thrown error doesn't leak a stack to the client.
+app.onError((e, c) => {
+  console.error("[unhandled]", e);
+  return err(c, "INTERNAL_ERROR", "Server error.");
+});
+
+// Reject any request body larger than 64 KiB. The largest legitimate body is
+// a WebAuthn assertion plus a vacation entry — both well under 8 KiB. Without
+// this, an attacker could ship a multi-MB JSON to consume CPU.
+app.use(
+  "/api/*",
+  bodyLimit({
+    maxSize: 64 * 1024,
+    onError: (c) => err(c, "VALIDATION_ERROR", "Request body too large."),
   }),
 );
 
@@ -73,4 +111,14 @@ app.all("/api/*", (c) => err(c, "NOT_FOUND", "API route not found."));
 
 export default {
   fetch: app.fetch,
+  // Daily housekeeping — drop expired sessions and email-verification tokens
+  // so D1 doesn't accumulate dead rows forever. Wired up via [triggers] in
+  // wrangler.toml.
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(
+      Promise.all([purgeExpiredSessions(env.DB), purgeExpiredEmailVerifications(env.DB)]).then(
+        () => undefined,
+      ),
+    );
+  },
 } satisfies ExportedHandler<HonoVars["Bindings"]>;

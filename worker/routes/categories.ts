@@ -32,7 +32,7 @@ r.post("/", async (c) => {
     accrues?: boolean;
     color?: string;
   }>();
-  const name = (body.name ?? "").trim();
+  const name = sanitiseCategoryName(body.name ?? "");
   if (!name || name.length > 60) {
     return err(c, "VALIDATION_ERROR", "Name is required (max 60 chars).");
   }
@@ -68,10 +68,32 @@ r.patch("/:id", async (c) => {
   if (body.color && !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
     return err(c, "VALIDATION_ERROR", "Color must be hex like #2563eb.");
   }
+  if (body.name !== undefined) {
+    const sanitised = sanitiseCategoryName(body.name);
+    if (!sanitised || sanitised.length > 60) {
+      return err(c, "VALIDATION_ERROR", "Name is required (max 60 chars).");
+    }
+    body.name = sanitised;
+  }
+  if (body.sort_order !== undefined) {
+    if (!Number.isInteger(body.sort_order) || body.sort_order < 0 || body.sort_order > 10000) {
+      return err(c, "VALIDATION_ERROR", "sort_order must be a non-negative integer.");
+    }
+  }
   const updated = await updateCategory(c.env.DB, user.id, id, body);
   if (!updated) return err(c, "NOT_FOUND", "Category not found.");
   return ok(c, updated);
 });
+
+/**
+ * Trim and strip control characters from a category name. The name flows
+ * into iCal SUMMARY, email Subject, and the PDF header — control chars
+ * (CR/LF/etc.) would corrupt iCal parsing or inject email headers.
+ */
+function sanitiseCategoryName(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x1F\x7F]+/g, " ").trim();
+}
 
 r.delete("/:id", async (c) => {
   const user = authedUser(c);
@@ -111,11 +133,7 @@ r.put("/allowances/:year{[0-9]+}/:categoryId", async (c) => {
     days_carryover < 0 ||
     days_carryover > 366
   ) {
-    return err(
-      c,
-      "VALIDATION_ERROR",
-      "days_allotted and days_carryover must be 0..366.",
-    );
+    return err(c, "VALIDATION_ERROR", "days_allotted and days_carryover must be 0..366.");
   }
   try {
     const allowance = await upsertAllowance(c.env.DB, user.id, {

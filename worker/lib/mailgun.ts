@@ -41,8 +41,7 @@ export async function sendCalendarInvite(
   if (!domain) throw new Error("MAILGUN_DOMAIN not configured.");
   const from = env.MAILGUN_FROM ?? `AFK <afk@${domain}>`;
   const region = (env.MAILGUN_REGION ?? "us").toLowerCase();
-  const apiBase =
-    region === "eu" ? "https://api.eu.mailgun.net" : "https://api.mailgun.net";
+  const apiBase = region === "eu" ? "https://api.eu.mailgun.net" : "https://api.mailgun.net";
 
   const mime = buildMime({
     from,
@@ -66,9 +65,7 @@ export async function sendCalendarInvite(
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(
-      `Mailgun send failed (${res.status}): ${body.slice(0, 500)}`,
-    );
+    throw new Error(`Mailgun send failed (${res.status}): ${body.slice(0, 500)}`);
   }
   const data = (await res.json()) as { id?: string };
   return { id: data.id };
@@ -83,17 +80,14 @@ export async function sendPlainEmail(
   opts: { to: string; subject: string; text: string },
 ): Promise<SendResult> {
   if (!env.MAILGUN_API_KEY) {
-    console.warn(
-      `[mailgun] skipping send (no MAILGUN_API_KEY) → ${opts.to}: ${opts.subject}`,
-    );
+    console.warn(`[mailgun] skipping send (no MAILGUN_API_KEY) → ${opts.to}: ${opts.subject}`);
     return { skipped: true };
   }
   const domain = env.MAILGUN_DOMAIN;
   if (!domain) throw new Error("MAILGUN_DOMAIN not configured.");
   const from = env.MAILGUN_FROM ?? `AFK <afk@${domain}>`;
   const region = (env.MAILGUN_REGION ?? "us").toLowerCase();
-  const apiBase =
-    region === "eu" ? "https://api.eu.mailgun.net" : "https://api.mailgun.net";
+  const apiBase = region === "eu" ? "https://api.eu.mailgun.net" : "https://api.mailgun.net";
 
   const form = new FormData();
   form.append("from", from);
@@ -109,9 +103,7 @@ export async function sendPlainEmail(
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(
-      `Mailgun send failed (${res.status}): ${body.slice(0, 500)}`,
-    );
+    throw new Error(`Mailgun send failed (${res.status}): ${body.slice(0, 500)}`);
   }
   const data = (await res.json()) as { id?: string };
   return { id: data.id };
@@ -134,12 +126,15 @@ function buildMime(opts: {
   const date = new Date().toUTCString();
   const messageId = `<${cryptoUUID()}@afk>`;
 
+  // Strip CR/LF from every header value before interpolation. Without this,
+  // a Subject built from user-controlled vacation public_desc could inject
+  // arbitrary RFC822 headers (Bcc:, From:, X-Spam-Bypass:, etc.).
   const lines: string[] = [];
-  lines.push(`From: ${opts.from}`);
-  lines.push(`To: ${opts.to}`);
-  lines.push(`Subject: ${opts.subject}`);
-  lines.push(`Date: ${date}`);
-  lines.push(`Message-ID: ${messageId}`);
+  lines.push(`From: ${headerValue(opts.from)}`);
+  lines.push(`To: ${headerValue(opts.to)}`);
+  lines.push(`Subject: ${headerValue(opts.subject)}`);
+  lines.push(`Date: ${headerValue(date)}`);
+  lines.push(`Message-ID: ${headerValue(messageId)}`);
   lines.push(`MIME-Version: 1.0`);
   lines.push(`Content-Type: multipart/mixed; boundary="${boundaryMix}"`);
   lines.push("");
@@ -169,9 +164,7 @@ function buildMime(opts: {
 
   // alt: text/calendar with method — what makes Outlook show "Accept"
   lines.push(`--${boundaryAlt}`);
-  lines.push(
-    `Content-Type: text/calendar; charset=UTF-8; method=${opts.method}`,
-  );
+  lines.push(`Content-Type: text/calendar; charset=UTF-8; method=${opts.method}`);
   lines.push(`Content-Transfer-Encoding: base64`);
   lines.push("");
   lines.push(icsBase64);
@@ -194,10 +187,23 @@ function buildMime(opts: {
   return lines.join("\r\n");
 }
 
+/**
+ * Sanitise a value bound for an RFC822 header. CR/LF anywhere in a header
+ * value is a header-injection vector; we replace control chars with spaces
+ * and cap length to avoid pathological inputs.
+ */
+function headerValue(s: string): string {
+  // Strip CR/LF/TAB/etc. control chars and DEL; cap length.
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x1F\x7F]+/g, " ").slice(0, 1000);
+}
+
 function randomBoundary(): string {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function cryptoUUID(): string {

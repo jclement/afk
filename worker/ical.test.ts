@@ -8,14 +8,10 @@ async function setup() {
     json: { name: "Vacation", accrues: true },
   });
   const cBody = (await cat.json()) as { data: { id: string } };
-  await authedFetch(
-    cookie,
-    `/api/v1/categories/allowances/2026/${cBody.data.id}`,
-    {
-      method: "PUT",
-      json: { days_allotted: 30, days_carryover: 0 },
-    },
-  );
+  await authedFetch(cookie, `/api/v1/categories/allowances/2026/${cBody.data.id}`, {
+    method: "PUT",
+    json: { days_allotted: 30, days_carryover: 0 },
+  });
   await authedFetch(cookie, "/api/v1/vacations", {
     method: "POST",
     json: {

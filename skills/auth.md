@@ -33,6 +33,7 @@ This makes development and testing frictionless — no need to register/login du
 - Support multiple passkeys per user (manage in Settings > Security)
 
 Config env vars:
+
 - `RP_ID` — relying party ID (e.g., `myapp.example.com`)
 - `RP_ORIGIN` — relying party origin (e.g., `https://myapp.example.com`)
 
@@ -45,6 +46,7 @@ Config env vars:
 - Rate limit: max 3 magic links per email per hour
 
 Config env vars:
+
 - `MAIL_PROVIDER` — `mailgun`, `ses`, `resend`
 - `MAIL_API_KEY` — provider API key
 - `MAIL_FROM` — sender address (e.g., `auth@myapp.example.com`)
@@ -56,23 +58,24 @@ For enterprise SSO and existing identity providers.
 
 **Required env vars — prompt the user for all of these:**
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `OIDC_CLIENT_ID` | OAuth client ID | `abc123` |
-| `OIDC_CLIENT_SECRET` | OAuth client secret | `secret_xyz` |
-| `OIDC_ISSUER_URL` | Issuer URL (used for discovery) | `https://accounts.google.com` |
-| `OIDC_AUTH_URL` | Authorization endpoint (if not using discovery) | `https://idp.example.com/authorize` |
-| `OIDC_TOKEN_URL` | Token endpoint (if not using discovery) | `https://idp.example.com/token` |
-| `OIDC_USERINFO_URL` | UserInfo endpoint (optional, if not in ID token) | `https://idp.example.com/userinfo` |
-| `OIDC_REDIRECT_URL` | Callback URL for your app | `https://myapp.example.com/auth/callback` |
-| `OIDC_SCOPES` | Scopes to request | `openid profile email` |
-| `OIDC_NAME_CLAIM` | JWT claim for display name | `name` or `preferred_username` |
-| `OIDC_EMAIL_CLAIM` | JWT claim for email | `email` |
-| `OIDC_ALLOWED_DOMAINS` | Comma-separated allowed email domains (optional) | `example.com,corp.example.com` |
-| `OIDC_ALLOWED_GROUPS` | Comma-separated allowed groups claim values (optional) | `app-users,admins` |
-| `OIDC_GROUPS_CLAIM` | JWT claim for group membership (optional) | `groups` |
+| Variable               | Description                                            | Example                                   |
+| ---------------------- | ------------------------------------------------------ | ----------------------------------------- |
+| `OIDC_CLIENT_ID`       | OAuth client ID                                        | `abc123`                                  |
+| `OIDC_CLIENT_SECRET`   | OAuth client secret                                    | `secret_xyz`                              |
+| `OIDC_ISSUER_URL`      | Issuer URL (used for discovery)                        | `https://accounts.google.com`             |
+| `OIDC_AUTH_URL`        | Authorization endpoint (if not using discovery)        | `https://idp.example.com/authorize`       |
+| `OIDC_TOKEN_URL`       | Token endpoint (if not using discovery)                | `https://idp.example.com/token`           |
+| `OIDC_USERINFO_URL`    | UserInfo endpoint (optional, if not in ID token)       | `https://idp.example.com/userinfo`        |
+| `OIDC_REDIRECT_URL`    | Callback URL for your app                              | `https://myapp.example.com/auth/callback` |
+| `OIDC_SCOPES`          | Scopes to request                                      | `openid profile email`                    |
+| `OIDC_NAME_CLAIM`      | JWT claim for display name                             | `name` or `preferred_username`            |
+| `OIDC_EMAIL_CLAIM`     | JWT claim for email                                    | `email`                                   |
+| `OIDC_ALLOWED_DOMAINS` | Comma-separated allowed email domains (optional)       | `example.com,corp.example.com`            |
+| `OIDC_ALLOWED_GROUPS`  | Comma-separated allowed groups claim values (optional) | `app-users,admins`                        |
+| `OIDC_GROUPS_CLAIM`    | JWT claim for group membership (optional)              | `groups`                                  |
 
 **Flow:**
+
 1. Redirect to `OIDC_AUTH_URL` with client_id, redirect_uri, scopes, state, nonce
 2. User authenticates with IdP
 3. Callback receives authorization code
@@ -83,6 +86,7 @@ For enterprise SSO and existing identity providers.
 8. Create or update local user record, create session
 
 **Validation:**
+
 - Always verify the ID token signature against the provider's JWKS
 - Validate `iss`, `aud`, `exp`, `nonce` claims
 - If `OIDC_ALLOWED_DOMAINS` is set, reject emails not in the list

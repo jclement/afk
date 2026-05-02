@@ -13,12 +13,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 export default [
   js.configs.recommended,
   {
-    ignores: [
-      "dist/",
-      "node_modules/",
-      ".wrangler/",
-      "src/routeTree.gen.ts",
-    ],
+    ignores: ["dist/", "node_modules/", ".wrangler/", "public/", "src/routeTree.gen.ts"],
   },
   {
     files: ["**/*.{ts,tsx}"],
@@ -39,6 +34,12 @@ export default [
         URLSearchParams: "readonly",
         crypto: "readonly",
         TextEncoder: "readonly",
+        TextDecoder: "readonly",
+        queueMicrotask: "readonly",
+        HTMLElement: "readonly",
+        HTMLDivElement: "readonly",
+        HTMLInputElement: "readonly",
+        HTMLButtonElement: "readonly",
         atob: "readonly",
         btoa: "readonly",
         prompt: "readonly",
@@ -77,7 +78,10 @@ export default [
       ...tseslint.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
       "@typescript-eslint/no-explicit-any": "off", // we already use `never` for unsafe casts
     },
   },

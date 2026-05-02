@@ -24,8 +24,8 @@ export function VacationList(props: Props) {
     return (
       <div className="card p-8 text-center">
         <div className="text-sm text-subtle">
-          No vacations yet. Suspicious. Click <span className="font-semibold text-heading">Book Vacation</span> and
-          remedy that.
+          No vacations yet. Suspicious. Click{" "}
+          <span className="font-semibold text-heading">Book Vacation</span> and remedy that.
         </div>
       </div>
     );
@@ -73,9 +73,7 @@ function VacationRow({
   const cost = vacationDayCost(v);
   const isCancelled = !!v.cancelled_at;
   return (
-    <tr
-      className={`border-t border-subtle ${isCancelled ? "text-muted" : "text-body"}`}
-    >
+    <tr className={`border-t border-subtle ${isCancelled ? "text-muted" : "text-body"}`}>
       <td className={`px-3 py-2 font-mono ${isCancelled ? "line-through" : ""}`}>
         {describeVacation(v)}
       </td>
@@ -110,26 +108,18 @@ function VacationCard({
   const isCancelled = !!v.cancelled_at;
   const note = v.public_desc || v.internal_desc || "";
   return (
-    <div
-      className={`card p-3 flex flex-col gap-2 ${isCancelled ? "opacity-70" : ""}`}
-    >
+    <div className={`card p-3 flex flex-col gap-2 ${isCancelled ? "opacity-70" : ""}`}>
       <div className="flex items-center gap-2">
         <CategoryPill category={v.category} />
-        <span className="font-mono text-xs text-subtle ml-auto">
-          {cost.toString()} d
-        </span>
+        <span className="font-mono text-xs text-subtle ml-auto">{cost.toString()} d</span>
       </div>
       <div
         className={`text-sm font-mono text-heading ${isCancelled ? "line-through text-muted" : ""}`}
       >
         {describeVacation(v)}
       </div>
-      {note && (
-        <div className="text-xs text-subtle line-clamp-2">{note}</div>
-      )}
-      {isCancelled && (
-        <div className="text-[11px] text-muted italic">Cancelled</div>
-      )}
+      {note && <div className="text-xs text-subtle line-clamp-2">{note}</div>}
+      {isCancelled && <div className="text-[11px] text-muted italic">Cancelled</div>}
       <div className="flex justify-end pt-1 -mb-1">
         <ActionButtons
           v={v}
@@ -146,10 +136,7 @@ function VacationCard({
 function CategoryPill({ category }: { category: Category | null }) {
   if (!category) return <span className="text-muted text-xs">—</span>;
   return (
-    <span
-      className="pill"
-      style={{ backgroundColor: category.color }}
-    >
+    <span className="pill" style={{ backgroundColor: category.color }}>
       {category.name}
     </span>
   );

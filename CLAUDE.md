@@ -12,11 +12,11 @@ You are bootstrapping and building applications for Jeff Clement. This directory
 
 Pick **one** based on the project description:
 
-| Stack | When | Key Trait |
-|-------|------|-----------|
-| **Go Web** | Self-hosted web apps, internal tools, APIs | Single binary with embedded React SPA, SQLite/Postgres |
-| **Go CLI/TUI** | Terminal tools, automation, developer utilities | Single binary, Bubble Tea, colorful output |
-| **Cloudflare Worker** | Edge-deployed web apps, lightweight SaaS | Vite + Workers, D1/KV, deploy with Wrangler |
+| Stack                 | When                                            | Key Trait                                              |
+| --------------------- | ----------------------------------------------- | ------------------------------------------------------ |
+| **Go Web**            | Self-hosted web apps, internal tools, APIs      | Single binary with embedded React SPA, SQLite/Postgres |
+| **Go CLI/TUI**        | Terminal tools, automation, developer utilities | Single binary, Bubble Tea, colorful output             |
+| **Cloudflare Worker** | Edge-deployed web apps, lightweight SaaS        | Vite + Workers, D1/KV, deploy with Wrangler            |
 
 If the description is ambiguous, ask.
 
@@ -26,26 +26,26 @@ Skills are reference documents that encode best practices. **Read the relevant s
 
 ### Always Load (every project, every session)
 
-| Skill | File | Contains |
-|-------|------|----------|
-| **Dev Tooling** | `skills/devtools.md` | mise setup, tasks, `mise exec`, hot reload, `.claude/settings.json` |
-| **Testing** | `skills/testing.md` | Unit tests, E2E, linting — run on every change, never skip |
-| **Code Quality** | `skills/code-quality.md` | Readability, comments, naming, structure — for human Jeff |
-| **Documentation** | `skills/docs.md` | Auto-maintain README.md and DESIGN.md with every change |
+| Skill             | File                     | Contains                                                            |
+| ----------------- | ------------------------ | ------------------------------------------------------------------- |
+| **Dev Tooling**   | `skills/devtools.md`     | mise setup, tasks, `mise exec`, hot reload, `.claude/settings.json` |
+| **Testing**       | `skills/testing.md`      | Unit tests, E2E, linting — run on every change, never skip          |
+| **Code Quality**  | `skills/code-quality.md` | Readability, comments, naming, structure — for human Jeff           |
+| **Documentation** | `skills/docs.md`         | Auto-maintain README.md and DESIGN.md with every change             |
 
 ### Load When Triggered
 
-| Skill | File | Load when... |
-|-------|------|-------------|
-| **UI Design** | `skills/ui.md` | Creating or modifying frontend UI, components, layouts, styles |
-| **Authentication** | `skills/auth.md` | Adding login/register, sessions, SUPPRESS_AUTH, user management |
-| **CLI** | `skills/cli.md` | Building a terminal application, adding commands, TUI work |
-| **Deployment** | `skills/deploy.md` | Setting up CI/CD, GitHub Actions, Dockerfiles, GoReleaser |
-| **Auto-Update** | `skills/auto-update.md` | Implementing self-update, version checking, sigstore verification |
-| **Database** | `skills/database.md` | Adding tables, migrations, queries, switching SQLite/Postgres |
-| **Web API** | `skills/api.md` | Adding API endpoints, API keys, OpenAPI docs, Swagger |
-| **Devcontainer** | `skills/devcontainer.md` | Setting up `.devcontainer/` for the project |
-| **Security** | `skills/security.md` | Any change touching auth, user input, API endpoints, or data access |
+| Skill              | File                     | Load when...                                                        |
+| ------------------ | ------------------------ | ------------------------------------------------------------------- |
+| **UI Design**      | `skills/ui.md`           | Creating or modifying frontend UI, components, layouts, styles      |
+| **Authentication** | `skills/auth.md`         | Adding login/register, sessions, SUPPRESS_AUTH, user management     |
+| **CLI**            | `skills/cli.md`          | Building a terminal application, adding commands, TUI work          |
+| **Deployment**     | `skills/deploy.md`       | Setting up CI/CD, GitHub Actions, Dockerfiles, GoReleaser           |
+| **Auto-Update**    | `skills/auto-update.md`  | Implementing self-update, version checking, sigstore verification   |
+| **Database**       | `skills/database.md`     | Adding tables, migrations, queries, switching SQLite/Postgres       |
+| **Web API**        | `skills/api.md`          | Adding API endpoints, API keys, OpenAPI docs, Swagger               |
+| **Devcontainer**   | `skills/devcontainer.md` | Setting up `.devcontainer/` for the project                         |
+| **Security**       | `skills/security.md`     | Any change touching auth, user input, API endpoints, or data access |
 
 ## Universal Rules
 
@@ -97,7 +97,7 @@ Code must be readable by human Jeff six months from now. See `skills/code-qualit
 
 - Every file gets a top-of-file comment explaining its purpose
 - Every exported function/component gets a doc comment
-- Non-obvious decisions get *why* comments (not *what*)
+- Non-obvious decisions get _why_ comments (not _what_)
 - Functions under ~40 lines, use early returns, descriptive names
 - Match existing patterns in the codebase — consistency matters
 
@@ -112,11 +112,42 @@ Before finishing any task that touches auth, API endpoints, user input, or data 
 - API keys: hash with SHA-256, show plaintext once at creation
 - Set security headers on all responses
 
+### MANDATORY: Data Export Contract
+
+Every app that stores user data MUST offer an "export everything" download
+(JSON, plus CSV for the most spreadsheet-worthy table). Users own their data
+and must be able to walk away with all of it.
+
+**When you add a new user-data table or column, you MUST:**
+
+1. **Extend the JSON export** in `worker/lib/export.ts` (or the app's
+   equivalent) to include the new field. The JSON dump is a complete
+   round-trip-able snapshot — missing fields = data loss when migrating.
+2. **Extend the CSV export** if the field belongs to the table being flattened
+   (e.g. a new vacation column).
+3. **Bump `EXPORT_SCHEMA_VERSION`** if the change is incompatible with prior
+   exports (renamed/removed fields, changed types). Additive changes don't
+   need a bump.
+4. **Add a test assertion** in `worker/export.test.ts` (or the app's equivalent)
+   that the new field appears in the export with the expected value. This is
+   the safety net — without it the next reviewer can silently drop a column
+   from the export and nobody notices until a user tries to migrate.
+5. **Document the field** in DESIGN.md's data-model section.
+
+The export tests look for an "ADD A NEW ASSERTION HERE" anchor comment —
+keep it there as a tripwire for future contributors.
+
+**What to exclude from exports:** secrets and credentials (passkey public
+keys, session tokens, iCal feed tokens, email-verification tokens). These
+are device/keystore artefacts, not user data; they don't survive a migration
+and exposing them in a download is a credential-leak risk.
+
 ## Bootstrapping Sequence
 
 When building a new app, follow this order:
 
 ### Go Web
+
 1. `mise.toml`, `.air.toml`, `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.goreleaser`
 2. `.claude/settings.json` (permissions for dev tools)
 3. `.devcontainer/devcontainer.json`, `.devcontainer/setup.sh`
@@ -131,6 +162,7 @@ When building a new app, follow this order:
 12. `fnox.local.toml.sample`, `.gitignore`, `CLAUDE.md`, `README.md`, `DESIGN.md`
 
 ### Go CLI/TUI
+
 1. `mise.toml`, `.air.toml`, `.goreleaser.yaml`, `Dockerfile`, `Dockerfile.goreleaser`
 2. `.claude/settings.json`, `.devcontainer/devcontainer.json`, `.devcontainer/setup.sh`
 3. `go.mod`, `cmd/<appname>/main.go` (Cobra root, config, TUI launch, TTY detection)
@@ -141,6 +173,7 @@ When building a new app, follow this order:
 8. `fnox.local.toml.sample`, `.gitignore`, `CLAUDE.md`, `README.md`, `DESIGN.md`
 
 ### Cloudflare Worker
+
 1. `mise.toml`, `wrangler.toml`, `vite.config.ts`, `tsconfig.json`, `package.json`
 2. `.claude/settings.json`, `.devcontainer/devcontainer.json`, `.devcontainer/setup.sh`
 3. `worker/` — index.ts, router.ts, types.ts, middleware, handlers
@@ -182,12 +215,14 @@ Every app gets ~200 short, funny, domain-relevant taglines. Show on login screen
 ## Import/Export
 
 Every app that manages user data supports import/export from day one:
+
 - **Web:** Toolbar buttons for Export (CSV, JSON) and Import (with preview + validation)
 - **CLI:** `--json` and `--format` flags, stdin support for piping
 
 ## Common Workflows
 
 **Adding a new API endpoint:**
+
 1. Define in OpenAPI spec (Go) or add handler directly
 2. Add handler with tests
 3. Add React Query hook
@@ -195,6 +230,7 @@ Every app that manages user data supports import/export from day one:
 5. Update README.md (key endpoints table) and DESIGN.md (if new pattern)
 
 **Adding a new frontend page:**
+
 1. Add route in `src/routes/` (or `frontend/src/routes/`)
 2. Add components to `src/components/`
 3. Wire up API hooks
@@ -203,6 +239,7 @@ Every app that manages user data supports import/export from day one:
 6. Update README.md if user-facing
 
 **Adding a database migration:**
+
 1. `mise run db:new "description"`
 2. Write SQL for both SQLite and Postgres (if dual-driver)
 3. `mise run db:migrate`

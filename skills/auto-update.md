@@ -40,12 +40,14 @@ type CheckResult struct {
 ## Surfacing Updates
 
 ### Web Applications
+
 - `GET /api/v1/health` returns `{"status":"ok","version":"v1.2.3","update_available":"v1.3.0"}` (or omit field if current)
 - UI footer shows version; when update available: `v1.0.5 (v1.1.0 available — upgrade)` with a link
 - Admin-only "Update" button that triggers `POST /api/v1/admin/update`
 - After update: graceful shutdown (let systemd/supervisor restart the process)
 
 ### CLI / TUI Applications
+
 - `--version` output includes update notice
 - TUI status bar: `v1.0.5 (v1.1.0 available)` with `U` keybinding
 - `<appname> update` subcommand for manual update
@@ -147,6 +149,7 @@ func verifySigstoreBundle(checksumData, bundleData []byte, repo string) error {
 ### Backwards Compatibility
 
 Support both:
+
 - New protobuf-based sigstore bundle format (`.sigstore.json`)
 - Older cosign detached signature format (`.sig`)
 

@@ -31,17 +31,17 @@ You are designing and building UI for a web application. Follow this design syst
 
 Use CSS custom properties that swap via `.dark` class on `<html>`:
 
-| Token | Light | Dark |
-|-------|-------|------|
-| `--color-surface` | `#ffffff` | `#111827` |
+| Token                 | Light     | Dark      |
+| --------------------- | --------- | --------- |
+| `--color-surface`     | `#ffffff` | `#111827` |
 | `--color-surface-alt` | `#f9fafb` | `#0a0f1a` |
-| `--color-heading` | `#111827` | `#f9fafb` |
-| `--color-body` | `#374151` | `#e5e7eb` |
-| `--color-subtle` | `#4b5563` | `#d1d5db` |
-| `--color-muted` | `#9ca3af` | `#6b7280` |
-| `--color-border` | `#e5e7eb` | `#374151` |
-| `--color-hover` | `#f9fafb` | `#1f2937` |
-| `--color-selected` | `#eff6ff` | `#172554` |
+| `--color-heading`     | `#111827` | `#f9fafb` |
+| `--color-body`        | `#374151` | `#e5e7eb` |
+| `--color-subtle`      | `#4b5563` | `#d1d5db` |
+| `--color-muted`       | `#9ca3af` | `#6b7280` |
+| `--color-border`      | `#e5e7eb` | `#374151` |
+| `--color-hover`       | `#f9fafb` | `#1f2937` |
+| `--color-selected`    | `#eff6ff` | `#172554` |
 
 ## Dark Mode
 
@@ -56,6 +56,7 @@ Use CSS custom properties that swap via `.dark` class on `<html>`:
 All base styles target mobile. Layer `md:` (768px+) and `lg:` (1024px+) for larger screens.
 
 ### Mobile Layout
+
 - **Bottom navigation bar** for primary sections — fixed, always visible
 - **No persistent sidebar** on mobile — slide-over drawer (swipe right to open)
 - **Full-width cards** edge-to-edge
@@ -65,6 +66,7 @@ All base styles target mobile. Layer `md:` (768px+) and `lg:` (1024px+) for larg
 - Respect `env(safe-area-inset-*)` for notched devices
 
 ### Desktop Layout
+
 - Sidebar navigation on `lg:+`, top tabs on `md:`
 - Multi-column layouts allowed at `lg:+`
 
@@ -79,16 +81,19 @@ All base styles target mobile. Layer `md:` (768px+) and `lg:` (1024px+) for larg
 ## Component Patterns
 
 ### Buttons
+
 - Primary: `bg-primary text-white hover:bg-primary-dark px-2 py-1 text-xs font-medium rounded`
 - Secondary: `bg-surface border border-border text-body hover:bg-hover px-2 py-1 text-xs font-medium rounded`
 - Danger: `bg-danger text-white hover:bg-danger/90 px-2 py-1 text-xs font-medium rounded`
 - Always icon + text with `gap-1`, icons `w-4 h-4`
 
 ### Cards
+
 - `bg-white rounded border border-gray-200 shadow-sm` with `p-4` or `p-6`
 - Dark mode: `bg-surface border-border`
 
 ### Modals
+
 - Overlay: `bg-black/40` backdrop
 - Panel: centered, `rounded-lg shadow-xl`, animate `zoom-in-95 fade-in duration-150`
 - Title + close button in header, form in body, Cancel/Save right-aligned in footer
@@ -96,12 +101,14 @@ All base styles target mobile. Layer `md:` (768px+) and `lg:` (1024px+) for larg
 - Escape to dismiss
 
 ### Form Inputs
+
 - `border-gray-300 rounded text-sm px-2.5 py-2 bg-surface text-heading`
 - Focus: `ring-1 ring-primary border-primary`
 - Labels above inputs, `text-xs font-medium text-gray-700`
 - Error text in red below
 
 ### Tables / Data Grids (Preferred over cards for data)
+
 - Sticky headers, `text-xs font-semibold text-subtle`, sortable with chevron icons
 - Compact rows (~28px height), `px-2 py-1` cell padding
 - Row hover highlight, selected row with blue tint
@@ -110,6 +117,7 @@ All base styles target mobile. Layer `md:` (768px+) and `lg:` (1024px+) for larg
 - Pagination at bottom
 
 ### Toolbar
+
 - Horizontal bar above content areas
 - Left: filters, search, Import button, Export button
 - Right: action buttons, Add button
@@ -160,6 +168,7 @@ Every app gets ~200 short, funny taglines relevant to its domain. Show a random 
 ## Import/Export
 
 Every data table gets toolbar buttons for Import and Export:
+
 - **Export**: CSV (default, UTF-8 with BOM), JSON, optionally XLSX
 - **Import**: CSV + JSON minimum, preview table with validation, dry-run mode
 - Clear error messages: "Row 14: 'amount' must be a number, got 'banana'"

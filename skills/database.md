@@ -74,10 +74,10 @@ default:
 }
 ```
 
-| Env Var | Description | Default |
-|---------|-------------|---------|
-| `DATABASE_DRIVER` | `sqlite` or `postgres` | `sqlite` |
-| `DATABASE_URL` | Connection string or file path | `./<appname>.db` |
+| Env Var           | Description                    | Default          |
+| ----------------- | ------------------------------ | ---------------- |
+| `DATABASE_DRIVER` | `sqlite` or `postgres`         | `sqlite`         |
+| `DATABASE_URL`    | Connection string or file path | `./<appname>.db` |
 
 ## Migrations — Built-In, Auto-Run
 
@@ -172,6 +172,7 @@ echo "Created migration ${num}_$1"
 When supporting both SQLite and Postgres, keep SQL compatible:
 
 ### Safe to use in both:
+
 - `TEXT`, `INTEGER`, `REAL`, `BLOB` types
 - `CREATE TABLE IF NOT EXISTS`
 - `INSERT INTO ... ON CONFLICT DO UPDATE` (upsert)
@@ -181,15 +182,15 @@ When supporting both SQLite and Postgres, keep SQL compatible:
 
 ### Differences to watch:
 
-| Feature | SQLite | Postgres |
-|---------|--------|----------|
-| Auto-increment PK | `INTEGER PRIMARY KEY` | `SERIAL` or `GENERATED ALWAYS AS IDENTITY` |
-| UUID generation | Application-side | `gen_random_uuid()` |
-| Timestamps | `TEXT` with `datetime('now')` | `TIMESTAMPTZ` with `NOW()` |
-| Boolean | `INTEGER` (0/1) | `BOOLEAN` |
-| JSON | `TEXT` + `json_extract()` | `JSONB` + `->`, `->>` |
-| String concat | `\|\|` | `\|\|` |
-| RETURNING clause | Supported (3.35+) | Supported |
+| Feature           | SQLite                        | Postgres                                   |
+| ----------------- | ----------------------------- | ------------------------------------------ |
+| Auto-increment PK | `INTEGER PRIMARY KEY`         | `SERIAL` or `GENERATED ALWAYS AS IDENTITY` |
+| UUID generation   | Application-side              | `gen_random_uuid()`                        |
+| Timestamps        | `TEXT` with `datetime('now')` | `TIMESTAMPTZ` with `NOW()`                 |
+| Boolean           | `INTEGER` (0/1)               | `BOOLEAN`                                  |
+| JSON              | `TEXT` + `json_extract()`     | `JSONB` + `->`, `->>`                      |
+| String concat     | `\|\|`                        | `\|\|`                                     |
+| RETURNING clause  | Supported (3.35+)             | Supported                                  |
 
 **Best practice:** Use `TEXT` for UUIDs (both), generate UUIDs in application code, store timestamps as ISO 8601 TEXT (SQLite) or TIMESTAMPTZ (Postgres).
 

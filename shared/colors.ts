@@ -24,10 +24,7 @@ export const CATEGORY_PALETTE: readonly string[] = [
  * Pick the first palette color not already used by `existing`. If every
  * color is taken, falls back to a deterministic hash of the name.
  */
-export function nextCategoryColor(
-  name: string,
-  existingColors: readonly string[],
-): string {
+export function nextCategoryColor(name: string, existingColors: readonly string[]): string {
   for (const c of CATEGORY_PALETTE) {
     if (!existingColors.includes(c)) return c;
   }

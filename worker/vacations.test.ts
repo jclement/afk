@@ -8,14 +8,10 @@ async function setup() {
     json: { name: "Vacation", accrues: true },
   });
   const cBody = (await cat.json()) as { data: { id: string } };
-  await authedFetch(
-    cookie,
-    `/api/v1/categories/allowances/2026/${cBody.data.id}`,
-    {
-      method: "PUT",
-      json: { days_allotted: 30, days_carryover: 2 },
-    },
-  );
+  await authedFetch(cookie, `/api/v1/categories/allowances/2026/${cBody.data.id}`, {
+    method: "PUT",
+    json: { days_allotted: 30, days_carryover: 2 },
+  });
   return { cookie, categoryId: cBody.data.id };
 }
 
@@ -39,7 +35,9 @@ describe("vacations API", () => {
 
     const summary = await authedFetch(cookie, "/api/v1/vacations/summary/2026");
     const body = (await summary.json()) as {
-      data: { categories: Array<{ used_days: number; remaining_days: number; total_days: number }> };
+      data: {
+        categories: Array<{ used_days: number; remaining_days: number; total_days: number }>;
+      };
     };
     expect(body.data.categories[0]!.used_days).toBe(1);
     expect(body.data.categories[0]!.total_days).toBe(32);
@@ -105,11 +103,9 @@ describe("vacations API", () => {
     expect(body.data.categories[0]!.used_days).toBe(0);
 
     // Restore — usage should come back.
-    const uncancel = await authedFetch(
-      cookie,
-      `/api/v1/vacations/${v.data.id}/uncancel`,
-      { method: "POST" },
-    );
+    const uncancel = await authedFetch(cookie, `/api/v1/vacations/${v.data.id}/uncancel`, {
+      method: "POST",
+    });
     expect(uncancel.status).toBe(200);
     const restored = (await uncancel.json()) as { data: { cancelled_at: string | null } };
     expect(restored.data.cancelled_at).toBeNull();
@@ -134,7 +130,7 @@ describe("vacations API", () => {
       method: "POST",
       json: { name: "Vacation" },
     });
-    const cId = (await cat.json() as { data: { id: string } }).data.id;
+    const cId = ((await cat.json()) as { data: { id: string } }).data.id;
     await authedFetch(userA.cookie, `/api/v1/categories/allowances/2026/${cId}`, {
       method: "PUT",
       json: { days_allotted: 10, days_carryover: 0 },
@@ -155,11 +151,9 @@ describe("vacations API", () => {
     // User B should not be able to see / cancel / delete user A's vacation.
     const stolen = await authedFetch(userB.cookie, `/api/v1/vacations/${v.data.id}`);
     expect(stolen.status).toBe(404);
-    const cancelled = await authedFetch(
-      userB.cookie,
-      `/api/v1/vacations/${v.data.id}/cancel`,
-      { method: "POST" },
-    );
+    const cancelled = await authedFetch(userB.cookie, `/api/v1/vacations/${v.data.id}/cancel`, {
+      method: "POST",
+    });
     expect(cancelled.status).toBe(404);
     const deleted = await authedFetch(userB.cookie, `/api/v1/vacations/${v.data.id}`, {
       method: "DELETE",

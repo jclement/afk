@@ -77,6 +77,7 @@ description = "Format code"
 ```
 
 If the app has a database, also include:
+
 ```toml
 [tasks."db:migrate"]
 description = "Apply migrations locally"

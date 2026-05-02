@@ -131,18 +131,21 @@ Adjust CSP as needed but start restrictive and loosen only when necessary.
 ## Security Patterns by Stack
 
 ### Go Web
+
 - Use `net/http` middleware for security headers (applied to all routes)
 - `database/sql` with `?` placeholders prevents SQL injection
 - `html/template` auto-escapes HTML (use it for any server-rendered content)
 - `crypto/rand.Read()` for token generation
 
 ### Cloudflare Workers / Bun
+
 - Use `crypto.randomUUID()` or `crypto.getRandomValues()` for tokens
 - D1 parameterized queries (`db.prepare("...").bind(...)`) prevent SQL injection
 - React's JSX auto-escaping handles most XSS
 - `Hono` middleware for headers and CORS
 
 ### CLI / TUI
+
 - Never execute user input as shell commands
 - Validate file paths from user input
 - When downloading updates: verify checksums and signatures (see `auto-update.md`)

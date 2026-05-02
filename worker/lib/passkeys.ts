@@ -125,7 +125,11 @@ export async function startRegistration(
     excludeCredentials: excludeCredentialIds.map((id) => ({ id })),
     authenticatorSelection: {
       residentKey: "preferred",
-      userVerification: "preferred",
+      // "required" because this app holds personal data — we want a biometric
+      // / PIN tap on every authentication, not just possession of the device.
+      // Most modern authenticators (TouchID, Face ID, Windows Hello, hardware
+      // keys with PIN) handle this transparently.
+      userVerification: "required",
     },
   });
 
@@ -171,7 +175,7 @@ export async function finishRegistration(
     expectedChallenge: pending.challenge,
     expectedOrigin: rp.origin,
     expectedRPID: rp.rpID,
-    requireUserVerification: false,
+    requireUserVerification: true,
   });
   if (!verification.verified || !verification.registrationInfo) {
     throw new AuthError("Passkey registration failed verification.");
@@ -210,7 +214,7 @@ export async function startAuthentication(
   const options = await generateAuthenticationOptions({
     rpID: rp.rpID,
     timeout: 60_000,
-    userVerification: "preferred",
+    userVerification: "required",
     allowCredentials: allowedCredentials.map((c) => ({
       id: c.id,
       transports: c.transports ?? undefined,
@@ -267,22 +271,30 @@ export async function finishAuthentication(
       counter: stored.counter,
       transports: stored.transports ?? undefined,
     },
-    requireUserVerification: false,
+    requireUserVerification: true,
   });
   if (!verification.verified) {
     throw new AuthError("Passkey verification failed.");
   }
+  // Cloned-authenticator detection. SimpleWebAuthn already throws when
+  // newCounter is non-zero AND <= stored, but a hardware key whose counter
+  // legitimately advanced past zero, then suddenly reports zero, is also a
+  // clone signal that doesn't trip the library's check. Refuse it explicitly.
+  const newCounter = verification.authenticationInfo.newCounter;
+  if (stored.counter > 0 && newCounter === 0) {
+    throw new AuthError(
+      "Authenticator counter regressed — possible cloned credential.",
+      "UNAUTHORIZED",
+    );
+  }
   return {
     user_id: stored.user_id,
     credential_id: stored.id,
-    new_counter: verification.authenticationInfo.newCounter,
+    new_counter: newCounter,
   };
 }
 
-async function loadCredential(
-  db: D1Database,
-  id: string,
-): Promise<StoredCredential | null> {
+async function loadCredential(db: D1Database, id: string): Promise<StoredCredential | null> {
   const row = await db
     .prepare(
       `SELECT id, user_id, public_key AS publicKey, counter, transports
@@ -312,10 +324,7 @@ async function loadCredential(
 
 export class AuthError extends Error {
   readonly code: "VALIDATION_ERROR" | "UNAUTHORIZED";
-  constructor(
-    message: string,
-    code: "VALIDATION_ERROR" | "UNAUTHORIZED" = "VALIDATION_ERROR",
-  ) {
+  constructor(message: string, code: "VALIDATION_ERROR" | "UNAUTHORIZED" = "VALIDATION_ERROR") {
     super(message);
     this.code = code;
   }

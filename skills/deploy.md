@@ -51,7 +51,7 @@ on:
 permissions:
   contents: write
   packages: write
-  id-token: write  # Required for cosign OIDC keyless signing
+  id-token: write # Required for cosign OIDC keyless signing
 
 jobs:
   release:
@@ -79,6 +79,7 @@ jobs:
 ```
 
 **Key points:**
+
 - `id-token: write` is required for cosign keyless signing via GitHub OIDC
 - `sigstore/cosign-installer@v3` must run before GoReleaser
 - `fetch-depth: 0` is required for GoReleaser changelog generation
@@ -87,7 +88,7 @@ jobs:
 
 File: `.goreleaser.yaml`
 
-```yaml
+````yaml
 version: 2
 project_name: <appname>
 
@@ -178,7 +179,7 @@ release:
     ```bash
     docker pull ghcr.io/jclement/{{ .ProjectName }}:{{ .Version }}
     ```
-```
+````
 
 ## Dockerfile Patterns
 
@@ -287,6 +288,7 @@ Add `npm` ecosystem if the project has a `package.json`.
 ## Docker Compose Patterns
 
 ### Development (SQLite)
+
 ```yaml
 services:
   app:
@@ -298,6 +300,7 @@ services:
 ```
 
 ### Production (with Cloudflare Tunnel + Litestream)
+
 ```yaml
 services:
   app:

@@ -6,12 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
-import {
-  useCategories,
-  useCreateVacation,
-  useMe,
-  useUpdateVacation,
-} from "../api/hooks";
+import { useCategories, useCreateVacation, useMe, useUpdateVacation } from "../api/hooks";
 import { todayInTimezone, validateVacationShape } from "@shared/vacation-math";
 import type { Vacation } from "@shared/types";
 
@@ -208,7 +203,9 @@ export function BookingModal({ open, year, editing, onClose }: Props) {
           <textarea
             className="textarea"
             rows={4}
-            placeholder={"Booked the cabin. Bringing the dog. Don't tell Greg.\n\nMarkdown works: **bold**, _italic_, lists, [links](https://…)."}
+            placeholder={
+              "Booked the cabin. Bringing the dog. Don't tell Greg.\n\nMarkdown works: **bold**, _italic_, lists, [links](https://…)."
+            }
             maxLength={2000}
             value={internalDesc}
             onChange={(e) => setInternalDesc(e.target.value)}
@@ -217,9 +214,7 @@ export function BookingModal({ open, year, editing, onClose }: Props) {
             Markdown supported. Used as the body of the calendar invite emailed to you.
           </div>
         </div>
-        {error && (
-          <div className="text-sm text-[color:var(--color-danger)]">{error}</div>
-        )}
+        {error && <div className="text-sm text-[color:var(--color-danger)]">{error}</div>}
       </form>
     </Modal>
   );

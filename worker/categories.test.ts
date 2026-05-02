@@ -68,24 +68,16 @@ describe("categories API", () => {
     });
     const c = await readJson<{ data: { id: string } }>(cat);
 
-    let res = await authedFetch(
-      cookie,
-      `/api/v1/categories/allowances/2026/${c.data.id}`,
-      {
-        method: "PUT",
-        json: { days_allotted: 30, days_carryover: 2 },
-      },
-    );
+    let res = await authedFetch(cookie, `/api/v1/categories/allowances/2026/${c.data.id}`, {
+      method: "PUT",
+      json: { days_allotted: 30, days_carryover: 2 },
+    });
     expect(res.status).toBe(200);
 
-    res = await authedFetch(
-      cookie,
-      `/api/v1/categories/allowances/2026/${c.data.id}`,
-      {
-        method: "PUT",
-        json: { days_allotted: 1000, days_carryover: 0 },
-      },
-    );
+    res = await authedFetch(cookie, `/api/v1/categories/allowances/2026/${c.data.id}`, {
+      method: "PUT",
+      json: { days_allotted: 1000, days_carryover: 0 },
+    });
     expect(res.status).toBe(400);
   });
 });

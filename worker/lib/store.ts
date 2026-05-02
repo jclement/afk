@@ -10,13 +10,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { newId } from "./ids.js";
 import { CATEGORY_PALETTE, nextCategoryColor } from "../../shared/colors.js";
-import type {
-  Allowance,
-  Category,
-  ICalToken,
-  PasskeyMeta,
-  Vacation,
-} from "../../shared/types.js";
+import type { Allowance, Category, ICalToken, PasskeyMeta, Vacation } from "../../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Categories
@@ -31,10 +25,7 @@ function rowToCategory(r: CategoryRow): Category {
   return { ...r, archived: !!r.archived, accrues: !!r.accrues };
 }
 
-export async function listCategories(
-  db: D1Database,
-  userId: string,
-): Promise<Category[]> {
+export async function listCategories(db: D1Database, userId: string): Promise<Category[]> {
   const { results } = await db
     .prepare(
       `SELECT id, user_id, name, accrues, color, sort_order, archived, created_at
@@ -66,9 +57,7 @@ export async function createCategory(
     );
   const sortOrder =
     input.sort_order ??
-    (existing.length === 0
-      ? 0
-      : Math.max(...existing.map((c) => c.sort_order)) + 1);
+    (existing.length === 0 ? 0 : Math.max(...existing.map((c) => c.sort_order)) + 1);
   const accrues = input.accrues ? 1 : 0;
   await db
     .prepare(
@@ -123,7 +112,10 @@ export async function updateCategory(
   }
   vals.push(id, userId);
   const sql = `UPDATE categories SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`;
-  await db.prepare(sql).bind(...vals).run();
+  await db
+    .prepare(sql)
+    .bind(...vals)
+    .run();
   const row = await db
     .prepare(
       `SELECT id, user_id, name, accrues, color, sort_order, archived, created_at
@@ -153,10 +145,19 @@ export async function deleteCategory(
         "Category has active vacation entries. Archive it instead, or cancel its entries first.",
     };
   }
-  await db
-    .prepare(`DELETE FROM categories WHERE id = ? AND user_id = ?`)
-    .bind(id, userId)
-    .run();
+  // The schema FK on vacations.category_id is ON DELETE RESTRICT, so any
+  // remaining cancelled-but-not-deleted rows would block the DELETE below
+  // and throw a 500. Cancelled vacations are invisible to the user anyway —
+  // hard-delete them in the same batch as the category.
+  await db.batch([
+    db
+      .prepare(
+        `DELETE FROM vacations WHERE category_id = ? AND user_id = ? AND cancelled_at IS NOT NULL`,
+      )
+      .bind(id, userId),
+    db.prepare(`DELETE FROM allowances WHERE category_id = ? AND user_id = ?`).bind(id, userId),
+    db.prepare(`DELETE FROM categories WHERE id = ? AND user_id = ?`).bind(id, userId),
+  ]);
   return { deleted: true };
 }
 
@@ -175,6 +176,21 @@ export async function listAllowances(
        FROM allowances WHERE user_id = ? AND year = ?`,
     )
     .bind(userId, year)
+    .all<Allowance>();
+  return results ?? [];
+}
+
+/**
+ * All allowances for a user across every year. Used by the data-export
+ * endpoint — there's no per-year filter because the export is a full dump.
+ */
+export async function listAllAllowances(db: D1Database, userId: string): Promise<Allowance[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, user_id, category_id, year, days_allotted, days_carryover, notes
+       FROM allowances WHERE user_id = ? ORDER BY year, category_id`,
+    )
+    .bind(userId)
     .all<Allowance>();
   return results ?? [];
 }
@@ -198,9 +214,7 @@ export async function upsertAllowance(
   if (!owns) throw new Error("Category not found.");
 
   const existing = await db
-    .prepare(
-      `SELECT id FROM allowances WHERE category_id = ? AND year = ?`,
-    )
+    .prepare(`SELECT id FROM allowances WHERE category_id = ? AND year = ?`)
     .bind(input.category_id, input.year)
     .first<{ id: string }>();
 
@@ -209,12 +223,7 @@ export async function upsertAllowance(
       .prepare(
         `UPDATE allowances SET days_allotted = ?, days_carryover = ?, notes = ? WHERE id = ?`,
       )
-      .bind(
-        input.days_allotted,
-        input.days_carryover,
-        input.notes ?? null,
-        existing.id,
-      )
+      .bind(input.days_allotted, input.days_carryover, input.notes ?? null, existing.id)
       .run();
     return {
       id: existing.id,
@@ -279,10 +288,7 @@ export async function listVacationsInYear(
   return results ?? [];
 }
 
-export async function listAllVacations(
-  db: D1Database,
-  userId: string,
-): Promise<Vacation[]> {
+export async function listAllVacations(db: D1Database, userId: string): Promise<Vacation[]> {
   const { results } = await db
     .prepare(
       `SELECT id, user_id, category_id, start_date, end_date, partial_amount,
@@ -376,20 +382,28 @@ export async function updateVacation(
       .first<{ id: string }>();
     if (!owns) throw new Error("Category not found.");
   }
-  const fields: string[] = [
-    "updated_at = datetime('now')",
-    "ical_sequence = ical_sequence + 1",
-  ];
+  // Allowlist: never interpolate object keys into SQL without one. Today's
+  // callers all pass typed keys, but a future caller spreading user input
+  // would otherwise be a SQLi vector.
+  const ALLOWED_KEYS = new Set([
+    "category_id",
+    "start_date",
+    "end_date",
+    "partial_amount",
+    "public_desc",
+    "internal_desc",
+    "cancelled_at",
+  ]);
+  const fields: string[] = ["updated_at = datetime('now')", "ical_sequence = ical_sequence + 1"];
   const vals: (string | number | null)[] = [];
   for (const [k, v] of Object.entries(patch)) {
+    if (!ALLOWED_KEYS.has(k)) continue;
     fields.push(`${k} = ?`);
     vals.push(v as never);
   }
   vals.push(id, userId);
   await db
-    .prepare(
-      `UPDATE vacations SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`,
-    )
+    .prepare(`UPDATE vacations SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`)
     .bind(...vals)
     .run();
   return await getVacation(db, userId, id);
@@ -435,11 +449,7 @@ export async function uncancelVacation(
   return await getVacation(db, userId, id);
 }
 
-export async function deleteVacation(
-  db: D1Database,
-  userId: string,
-  id: string,
-): Promise<boolean> {
+export async function deleteVacation(db: D1Database, userId: string, id: string): Promise<boolean> {
   const res = await db
     .prepare(`DELETE FROM vacations WHERE id = ? AND user_id = ?`)
     .bind(id, userId)
@@ -487,9 +497,7 @@ export async function createICalToken(
 ): Promise<{ id: string; token: string }> {
   const id = newId();
   await db
-    .prepare(
-      `INSERT INTO ical_tokens (id, user_id, token, scope, label) VALUES (?, ?, ?, ?, ?)`,
-    )
+    .prepare(`INSERT INTO ical_tokens (id, user_id, token, scope, label) VALUES (?, ?, ?, ?, ?)`)
     .bind(id, userId, input.token, input.scope, input.label)
     .run();
   return { id, token: input.token };
@@ -512,9 +520,7 @@ export async function findUserByICalToken(
   token: string,
 ): Promise<{ user_id: string; scope: "private" | "public" } | null> {
   const row = await db
-    .prepare(
-      `SELECT user_id, scope FROM ical_tokens WHERE token = ?`,
-    )
+    .prepare(`SELECT user_id, scope FROM ical_tokens WHERE token = ?`)
     .bind(token)
     .first<{ user_id: string; scope: "private" | "public" }>();
   if (!row) return null;
@@ -530,10 +536,7 @@ export async function findUserByICalToken(
 // Passkey credentials
 // ---------------------------------------------------------------------------
 
-export async function listPasskeys(
-  db: D1Database,
-  userId: string,
-): Promise<PasskeyMeta[]> {
+export async function listPasskeys(db: D1Database, userId: string): Promise<PasskeyMeta[]> {
   const { results } = await db
     .prepare(
       `SELECT id, nickname, device_type, backed_up, created_at, last_used_at
@@ -558,10 +561,7 @@ export async function listPasskeys(
   }));
 }
 
-export async function listCredentialIds(
-  db: D1Database,
-  userId: string,
-): Promise<string[]> {
+export async function listCredentialIds(db: D1Database, userId: string): Promise<string[]> {
   const { results } = await db
     .prepare(`SELECT id FROM credentials WHERE user_id = ?`)
     .bind(userId)
@@ -624,9 +624,7 @@ export async function updateCredentialCounter(
   counter: number,
 ): Promise<void> {
   await db
-    .prepare(
-      `UPDATE credentials SET counter = ?, last_used_at = datetime('now') WHERE id = ?`,
-    )
+    .prepare(`UPDATE credentials SET counter = ?, last_used_at = datetime('now') WHERE id = ?`)
     .bind(counter, id)
     .run();
 }
@@ -638,19 +636,13 @@ export async function renamePasskey(
   nickname: string,
 ): Promise<boolean> {
   const res = await db
-    .prepare(
-      `UPDATE credentials SET nickname = ? WHERE id = ? AND user_id = ?`,
-    )
+    .prepare(`UPDATE credentials SET nickname = ? WHERE id = ? AND user_id = ?`)
     .bind(nickname, id, userId)
     .run();
   return (res.meta?.changes ?? 0) > 0;
 }
 
-export async function deletePasskey(
-  db: D1Database,
-  userId: string,
-  id: string,
-): Promise<boolean> {
+export async function deletePasskey(db: D1Database, userId: string, id: string): Promise<boolean> {
   const res = await db
     .prepare(`DELETE FROM credentials WHERE id = ? AND user_id = ?`)
     .bind(id, userId)
@@ -659,10 +651,7 @@ export async function deletePasskey(
 }
 
 /** Used during onboarding so the first user gets sensible defaults. */
-export async function seedDefaultCategories(
-  db: D1Database,
-  userId: string,
-): Promise<void> {
+export async function seedDefaultCategories(db: D1Database, userId: string): Promise<void> {
   await createCategory(db, userId, {
     name: "Vacation",
     accrues: true,

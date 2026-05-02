@@ -11,30 +11,16 @@ export const DEV_USER_ID = "00000000-0000-0000-0000-000000000000";
 const SELECT_USER =
   "SELECT id, username, display_name, role, email, email_verified_at, timezone FROM users";
 
-export async function getUser(
-  db: D1Database,
-  id: string,
-): Promise<User | null> {
-  return await db
-    .prepare(`${SELECT_USER} WHERE id = ?`)
-    .bind(id)
-    .first<User>();
+export async function getUser(db: D1Database, id: string): Promise<User | null> {
+  return await db.prepare(`${SELECT_USER} WHERE id = ?`).bind(id).first<User>();
 }
 
-export async function getUserByUsername(
-  db: D1Database,
-  username: string,
-): Promise<User | null> {
-  return await db
-    .prepare(`${SELECT_USER} WHERE username = ?`)
-    .bind(username)
-    .first<User>();
+export async function getUserByUsername(db: D1Database, username: string): Promise<User | null> {
+  return await db.prepare(`${SELECT_USER} WHERE username = ?`).bind(username).first<User>();
 }
 
 export async function userCount(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM users`)
-    .first<{ n: number }>();
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM users`).first<{ n: number }>();
   return row?.n ?? 0;
 }
 
@@ -101,10 +87,7 @@ export async function setUserTimezone(
 ): Promise<User | null> {
   const sanitised = sanitiseTimezone(timezone);
   if (!sanitised) throw new Error("Invalid timezone.");
-  await db
-    .prepare(`UPDATE users SET timezone = ? WHERE id = ?`)
-    .bind(sanitised, userId)
-    .run();
+  await db.prepare(`UPDATE users SET timezone = ? WHERE id = ?`).bind(sanitised, userId).run();
   return getUser(db, userId);
 }
 
@@ -144,17 +127,12 @@ export async function startEmailChange(
     throw new Error("Invalid email address.");
   }
   await db
-    .prepare(
-      `UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?`,
-    )
+    .prepare(`UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?`)
     .bind(normalized, userId)
     .run();
 
   // Replace any prior outstanding tokens for this user — only one live at a time.
-  await db
-    .prepare(`DELETE FROM email_verifications WHERE user_id = ?`)
-    .bind(userId)
-    .run();
+  await db.prepare(`DELETE FROM email_verifications WHERE user_id = ?`).bind(userId).run();
 
   const token = randomToken(32);
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -173,44 +151,28 @@ export async function startEmailChange(
  * user whose current email doesn't match the token's email (defense against
  * a stale token re-verifying a since-changed address).
  */
-export async function verifyEmailToken(
-  db: D1Database,
-  token: string,
-): Promise<User | null> {
+export async function verifyEmailToken(db: D1Database, token: string): Promise<User | null> {
   const row = await db
-    .prepare(
-      `SELECT user_id, email, expires_at FROM email_verifications WHERE token = ?`,
-    )
+    .prepare(`SELECT user_id, email, expires_at FROM email_verifications WHERE token = ?`)
     .bind(token)
     .first<{ user_id: string; email: string; expires_at: string }>();
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    await db
-      .prepare(`DELETE FROM email_verifications WHERE token = ?`)
-      .bind(token)
-      .run();
+    await db.prepare(`DELETE FROM email_verifications WHERE token = ?`).bind(token).run();
     return null;
   }
   const user = await getUser(db, row.user_id);
   if (!user || user.email !== row.email) {
     // Stale: user changed their email between issue and click. Drop the row
     // and refuse — they'll need to re-request.
-    await db
-      .prepare(`DELETE FROM email_verifications WHERE token = ?`)
-      .bind(token)
-      .run();
+    await db.prepare(`DELETE FROM email_verifications WHERE token = ?`).bind(token).run();
     return null;
   }
   await db
-    .prepare(
-      `UPDATE users SET email_verified_at = datetime('now') WHERE id = ?`,
-    )
+    .prepare(`UPDATE users SET email_verified_at = datetime('now') WHERE id = ?`)
     .bind(user.id)
     .run();
-  await db
-    .prepare(`DELETE FROM email_verifications WHERE user_id = ?`)
-    .bind(user.id)
-    .run();
+  await db.prepare(`DELETE FROM email_verifications WHERE user_id = ?`).bind(user.id).run();
   return await getUser(db, user.id);
 }
 
@@ -224,10 +186,7 @@ export async function reissueEmailToken(
 ): Promise<{ token: string; email: string; expires_at: string } | null> {
   const user = await getUser(db, userId);
   if (!user?.email || user.email_verified_at) return null;
-  await db
-    .prepare(`DELETE FROM email_verifications WHERE user_id = ?`)
-    .bind(userId)
-    .run();
+  await db.prepare(`DELETE FROM email_verifications WHERE user_id = ?`).bind(userId).run();
   const token = randomToken(32);
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   await db
@@ -240,24 +199,27 @@ export async function reissueEmailToken(
   return { token, email: user.email, expires_at: expires };
 }
 
-export async function clearUserEmail(
-  db: D1Database,
-  userId: string,
-): Promise<void> {
+/** Drop expired email-verification tokens. Called from the daily cron. */
+export async function purgeExpiredEmailVerifications(db: D1Database): Promise<void> {
+  // Same lexicographic-comparison gotcha as session purge — use julianday()
+  // so ISO and SQLite-format timestamps both compare numerically.
   await db
-    .prepare(
-      `UPDATE users SET email = NULL, email_verified_at = NULL WHERE id = ?`,
-    )
+    .prepare(`DELETE FROM email_verifications WHERE julianday(expires_at) < julianday('now')`)
+    .run();
+}
+
+export async function clearUserEmail(db: D1Database, userId: string): Promise<void> {
+  await db
+    .prepare(`UPDATE users SET email = NULL, email_verified_at = NULL WHERE id = ?`)
     .bind(userId)
     .run();
-  await db
-    .prepare(`DELETE FROM email_verifications WHERE user_id = ?`)
-    .bind(userId)
-    .run();
+  await db.prepare(`DELETE FROM email_verifications WHERE user_id = ?`).bind(userId).run();
 }
 
 function randomToken(bytes: number): string {
   const buf = new Uint8Array(bytes);
   crypto.getRandomValues(buf);
-  return Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(buf)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }

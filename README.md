@@ -37,14 +37,14 @@ mise run dev
 
 ## Configuration
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `RP_ID` | WebAuthn relying-party ID (host name) | `afk.onewheelgeek.net` | Yes (prod) |
-| `RP_NAME` | WebAuthn relying-party name (shown in OS UI) | `AFK` | Yes |
-| `APP_ORIGIN` | Origin URL used for WebAuthn + iCal feed URLs | `https://afk.onewheelgeek.net` | Yes |
-| `APP_VERSION` | Version string returned by `/api/v1/health` | `dev` | No |
-| `SESSION_SECRET` | Reserved for future signed cookies | – | No (yet) |
-| `SUPPRESS_AUTH` | When `"true"`, skip auth and auto-login as a built-in dev user. **NEVER set in prod.** | (unset) | No |
+| Variable         | Description                                                                            | Default                        | Required   |
+| ---------------- | -------------------------------------------------------------------------------------- | ------------------------------ | ---------- |
+| `RP_ID`          | WebAuthn relying-party ID (host name)                                                  | `afk.onewheelgeek.net`         | Yes (prod) |
+| `RP_NAME`        | WebAuthn relying-party name (shown in OS UI)                                           | `AFK`                          | Yes        |
+| `APP_ORIGIN`     | Origin URL used for WebAuthn + iCal feed URLs                                          | `https://afk.onewheelgeek.net` | Yes        |
+| `APP_VERSION`    | Version string returned by `/api/v1/health`                                            | `dev`                          | No         |
+| `SESSION_SECRET` | Reserved for future signed cookies                                                     | –                              | No (yet)   |
+| `SUPPRESS_AUTH`  | When `"true"`, skip auth and auto-login as a built-in dev user. **NEVER set in prod.** | (unset)                        | No         |
 
 Local secrets live in `.dev.vars` (gitignored). Production values live in
 `wrangler.toml [env.production.vars]` plus `wrangler secret put` for sensitive ones.
@@ -60,22 +60,22 @@ Defined in `wrangler.toml`:
 
 ## Development
 
-| Command | What it does |
-|---------|--------------|
-| `mise run dev` | Vite + Workerd dev server with HMR |
-| `mise run test` | Vitest unit + integration tests (Workers pool) |
-| `mise run test:e2e` | Playwright end-to-end tests |
-| `mise run lint` | `tsc --noEmit` + ESLint |
-| `mise run fmt` | Prettier + `eslint --fix` |
-| `mise run build` | Production build (Vite + worker) |
-| `mise run deploy` | Build + deploy to **test** (`afk-test.workers.dev`) |
-| `mise run deploy:prod` | Build + deploy to **production** (refuses on dirty trees) |
-| `mise run release` | Bump tag and push — GitHub Actions deploys the tag to prod |
-| `mise run db:migrate` | Apply D1 migrations to the local test DB |
-| `mise run db:migrate:test` | Apply D1 migrations to the remote test DB |
-| `mise run db:migrate:prod` | Apply D1 migrations to the remote production DB |
-| `mise run db:new <name>` | Create a new numbered migration file |
-| `mise run dev:reset` | Wipe local Wrangler / Vite state |
+| Command                    | What it does                                               |
+| -------------------------- | ---------------------------------------------------------- |
+| `mise run dev`             | Vite + Workerd dev server with HMR                         |
+| `mise run test`            | Vitest unit + integration tests (Workers pool)             |
+| `mise run test:e2e`        | Playwright end-to-end tests                                |
+| `mise run lint`            | `tsc --noEmit` + ESLint                                    |
+| `mise run fmt`             | Prettier + `eslint --fix`                                  |
+| `mise run build`           | Production build (Vite + worker)                           |
+| `mise run deploy`          | Build + deploy to **test** (`afk-test.workers.dev`)        |
+| `mise run deploy:prod`     | Build + deploy to **production** (refuses on dirty trees)  |
+| `mise run release`         | Bump tag and push — GitHub Actions deploys the tag to prod |
+| `mise run db:migrate`      | Apply D1 migrations to the local test DB                   |
+| `mise run db:migrate:test` | Apply D1 migrations to the remote test DB                  |
+| `mise run db:migrate:prod` | Apply D1 migrations to the remote production DB            |
+| `mise run db:new <name>`   | Create a new numbered migration file                       |
+| `mise run dev:reset`       | Wipe local Wrangler / Vite state                           |
 
 ## API
 
@@ -84,48 +84,49 @@ programmatic clients aren't supported (it's a personal app).
 
 ### Key endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/health` | Liveness probe — no auth |
-| `GET` | `/api/v1/auth/status` | First-run check (`has_users`) |
-| `GET` | `/api/v1/auth/me` | Current user (or 401) |
-| `POST` | `/api/v1/auth/register/start` & `/finish` | Passkey registration |
-| `POST` | `/api/v1/auth/login/start` & `/finish` | Passkey authentication |
-| `POST` | `/api/v1/auth/logout` | Destroy session |
-| `GET` `POST` `PATCH` `DELETE` | `/api/v1/categories[/:id]` | Category CRUD |
-| `GET` `PUT` | `/api/v1/categories/allowances/:year[/:categoryId]` | Allowance per year |
-| `GET` | `/api/v1/vacations/summary/:year` | Year summary (widgets + list) |
-| `POST` `PATCH` | `/api/v1/vacations[/:id]` | Vacation CRUD |
-| `POST` | `/api/v1/vacations/:id/cancel` | Soft-cancel a vacation |
-| `GET` `POST` `DELETE` | `/api/v1/passkeys[/:id]` | Manage passkeys |
-| `GET` `POST` `DELETE` | `/api/v1/ical-tokens[/:id]` | Manage iCal feed tokens |
-| `GET` | `/api/v1/pdf/:year` | Render year summary as PDF |
-| `GET` | `/ical/:token.ics` | Public-facing iCal feed (token-authenticated) |
+| Method                        | Path                                                | Description                                   |
+| ----------------------------- | --------------------------------------------------- | --------------------------------------------- |
+| `GET`                         | `/api/v1/health`                                    | Liveness probe — no auth                      |
+| `GET`                         | `/api/v1/auth/status`                               | First-run check (`has_users`)                 |
+| `GET`                         | `/api/v1/auth/me`                                   | Current user (or 401)                         |
+| `POST`                        | `/api/v1/auth/register/start` & `/finish`           | Passkey registration                          |
+| `POST`                        | `/api/v1/auth/login/start` & `/finish`              | Passkey authentication                        |
+| `POST`                        | `/api/v1/auth/logout`                               | Destroy session                               |
+| `GET` `POST` `PATCH` `DELETE` | `/api/v1/categories[/:id]`                          | Category CRUD                                 |
+| `GET` `PUT`                   | `/api/v1/categories/allowances/:year[/:categoryId]` | Allowance per year                            |
+| `GET`                         | `/api/v1/vacations/summary/:year`                   | Year summary (widgets + list)                 |
+| `POST` `PATCH`                | `/api/v1/vacations[/:id]`                           | Vacation CRUD                                 |
+| `POST`                        | `/api/v1/vacations/:id/cancel`                      | Soft-cancel a vacation                        |
+| `GET` `POST` `DELETE`         | `/api/v1/passkeys[/:id]`                            | Manage passkeys                               |
+| `GET` `POST` `DELETE`         | `/api/v1/ical-tokens[/:id]`                         | Manage iCal feed tokens                       |
+| `GET`                         | `/api/v1/pdf/:year`                                 | Render year summary as PDF                    |
+| `GET`                         | `/ical/:token.ics`                                  | Public-facing iCal feed (token-authenticated) |
 
 ## Deployment
 
 Two environments, one Worker config (`wrangler.toml`):
 
-| Env | Worker | URL | D1 | KV |
-|-----|--------|-----|----|----|
-| `test` | `afk-test` | `afk-test.<acct>.workers.dev` | `afk-test-db` | `afk-test-kv` |
-| `production` | `afk` | `afk.onewheelgeek.net` | `afk-db` | `afk-kv` |
+| Env          | Worker     | URL                           | D1            | KV            |
+| ------------ | ---------- | ----------------------------- | ------------- | ------------- |
+| `test`       | `afk-test` | `afk-test.<acct>.workers.dev` | `afk-test-db` | `afk-test-kv` |
+| `production` | `afk`      | `afk.onewheelgeek.net`        | `afk-db`      | `afk-kv`      |
 
 `APP_VERSION` is computed at deploy time from git: the latest tag if HEAD is at it,
 otherwise `<tag>-<short-hash>`, with ` (dirty)` appended if the working tree is dirty.
 
 ### CI/CD — `.github/workflows/deploy.yml`
 
-| Trigger | Target |
-|---------|--------|
-| Push to `main` | `test` |
-| Push of a `v*` tag | `production` |
+| Trigger             | Target                        |
+| ------------------- | ----------------------------- |
+| Push to `main`      | `test`                        |
+| Push of a `v*` tag  | `production`                  |
 | `workflow_dispatch` | Choose `test` or `production` |
 
 The standard release flow is `mise run release` — it picks a new semver tag,
 creates it, pushes it, and the tag-push triggers the production deploy.
 
 Required GitHub secrets:
+
 - `CLOUDFLARE_API_TOKEN` — scoped to D1 + Workers + KV + Browser Rendering
 - `CLOUDFLARE_ACCOUNT_ID`
 

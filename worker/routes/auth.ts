@@ -4,10 +4,13 @@
  * setup flow.
  *
  * Anti-foot-guns:
- *   - Registration is open ONLY when no users exist (first-run setup) OR
- *     when the requester is already authenticated as an admin (adding a
- *     passkey for themselves). This is "personal" software — we don't want
- *     a stranger creating a second account on Jeff's deployment.
+ *   - Registration is OPEN to any visitor who picks an unused username.
+ *     The first user is auto-promoted to admin; subsequent users are role
+ *     "user". The only auth-gated branch is "username already exists" —
+ *     in that case the requester must already be signed in as that user
+ *     (i.e., adding another passkey to their own account). Without this
+ *     check, anyone who knew a username could attach a passkey to it and
+ *     impersonate the owner.
  *   - Login challenges are scoped to a `flow_id` that the server issues
  *     and the client returns. We never trust the client's challenge.
  *   - Sessions are server-side rows; the cookie just carries the token.
@@ -19,13 +22,7 @@ import type { Context } from "hono";
 import type { HonoVars } from "../types.js";
 import { isAuthSuppressed, requireAuth } from "../lib/auth.js";
 import { err, ok } from "../lib/responses.js";
-import {
-  createUser,
-  ensureDevUser,
-  getUser,
-  getUserByUsername,
-  userCount,
-} from "../lib/users.js";
+import { createUser, ensureDevUser, getUser, getUserByUsername, userCount } from "../lib/users.js";
 import {
   AuthError,
   finishAuthentication,
@@ -56,14 +53,38 @@ import type { User } from "../../shared/types.js";
  * authenticated and unauthenticated callers (e.g. /register/start lets you
  * create a brand-new account or, if signed in, add a passkey to your own).
  */
-async function currentUserFromCookie(
-  c: Context<HonoVars>,
-): Promise<User | null> {
+async function currentUserFromCookie(c: Context<HonoVars>): Promise<User | null> {
   const token = getCookie(c, SESSION_COOKIE);
   if (!token) return null;
   const session = await getSession(c.env.DB, token);
   if (!session) return null;
   return await getUser(c.env.DB, session.user_id);
+}
+
+/**
+ * Centralised registration gate. Returns an error response if the caller is
+ * not allowed to register (or attach a passkey to) the resolved user; null
+ * if the request is allowed.
+ *
+ * Open multi-user signup: anyone can pick an unused username. The gate
+ * exists only to protect the *existing-user* branch — when a username is
+ * already taken, the requester MUST already be authenticated as that user.
+ * Without this, anyone who knew a username could attach a new passkey to
+ * that account and impersonate them.
+ *
+ * Called from BOTH /register/start AND /register/finish so the check can't
+ * be bypassed by skipping straight to /finish with a captured flow_id.
+ */
+async function assertRegistrationAllowed(
+  c: Context<HonoVars>,
+  existing: User | null,
+  requester: User | null,
+): Promise<Response | null> {
+  if (!existing) return null;
+  if (!requester || requester.id !== existing.id) {
+    return err(c, "CONFLICT", "That username is taken. Pick another.");
+  }
+  return null;
 }
 
 const auth = new Hono<HonoVars>();
@@ -109,52 +130,34 @@ auth.get("/me", requireAuth, async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Registration — first-run setup OR an authenticated admin adding another
-// passkey for themselves.
+// Registration — open signup. Anyone can pick an unused username. Existing
+// users may add additional passkeys to their own account (the only branch
+// the gate restricts). The first user to register is auto-promoted to admin.
 // ---------------------------------------------------------------------------
 auth.post("/register/start", async (c) => {
   if (isAuthSuppressed(c.env)) {
     return err(c, "FORBIDDEN", "Registration disabled while SUPPRESS_AUTH is on.");
   }
 
-  const body = (await c.req
-    .json<{ username?: string; display_name?: string }>()
-    .catch(() => ({}) as { username?: string; display_name?: string })) ?? {};
+  const body =
+    (await c.req
+      .json<{ username?: string; display_name?: string }>()
+      .catch(() => ({}) as { username?: string; display_name?: string })) ?? {};
   const username = (body.username ?? "").trim().toLowerCase();
   const displayName = (body.display_name ?? "").trim();
   if (!username || username.length > 64 || !/^[a-z0-9._-]+$/.test(username)) {
-    return err(
-      c,
-      "VALIDATION_ERROR",
-      "Username must be 1-64 chars of [a-z0-9._-].",
-    );
+    return err(c, "VALIDATION_ERROR", "Username must be 1-64 chars of [a-z0-9._-].");
   }
   if (!displayName || displayName.length > 100) {
     return err(c, "VALIDATION_ERROR", "Display name is required (max 100 chars).");
   }
 
   const existing = await getUserByUsername(c.env.DB, username);
-  // Open multi-user signup. Two cases:
-  //   - new username → create the user during /finish (first one becomes admin)
-  //   - existing username → only allowed if the requester is already signed
-  //     in as that user (i.e., adding another passkey to their own account).
-  //     This route doesn't run requireAuth, so we have to look up the session
-  //     ourselves. Without this guard, anyone who knew a username could attach
-  //     a new passkey to that account and impersonate them.
-  if (existing) {
-    const requester = await currentUserFromCookie(c);
-    if (!requester || requester.id !== existing.id) {
-      return err(
-        c,
-        "CONFLICT",
-        "That username is taken. Pick another.",
-      );
-    }
-  }
+  const requester = await currentUserFromCookie(c);
+  const guard = await assertRegistrationAllowed(c, existing, requester);
+  if (guard) return guard;
 
-  const excludeIds = existing
-    ? await listCredentialIds(c.env.DB, existing.id)
-    : [];
+  const excludeIds = existing ? await listCredentialIds(c.env.DB, existing.id) : [];
 
   try {
     const result = await startRegistration(
@@ -189,8 +192,17 @@ auth.post("/register/finish", async (c) => {
       body.response as never,
     );
 
+    // Re-run the registration gate at finish time. /start could have been
+    // exempted (no users existed yet), but if someone else raced their own
+    // first-user setup in between, this finish must not silently demote them
+    // or attach a passkey to a user it shouldn't.
+    const existing = await getUserByUsername(c.env.DB, result.username);
+    const requester = await currentUserFromCookie(c);
+    const guard = await assertRegistrationAllowed(c, existing, requester);
+    if (guard) return guard;
+
     // Either reuse existing user (additional passkey) or create a new one.
-    let user = await getUserByUsername(c.env.DB, result.username);
+    let user = existing;
     let isNewUser = false;
     if (!user) {
       const total = await userCount(c.env.DB);
@@ -212,7 +224,7 @@ auth.post("/register/finish", async (c) => {
       transports: result.credential.transports,
       device_type: result.credential.deviceType,
       backed_up: result.credential.backedUp,
-      nickname: body.nickname?.trim() || "Default passkey",
+      nickname: (body.nickname?.trim() || "Default passkey").slice(0, 60),
     });
 
     if (isNewUser) {
@@ -248,13 +260,9 @@ auth.post("/login/start", async (c) => {
     return ok(c, { suppressed: true });
   }
 
-  const body = await c.req
-    .json<{ username?: string }>()
-    .catch(() => ({}) as { username?: string });
+  const body = await c.req.json<{ username?: string }>().catch(() => ({}) as { username?: string });
   const username = body.username?.trim().toLowerCase() || null;
-  const allowed = username
-    ? await listAllCredentialsForUsername(c.env.DB, username)
-    : [];
+  const allowed = username ? await listAllCredentialsForUsername(c.env.DB, username) : [];
   try {
     const result = await startAuthentication(
       c.env.KV,
@@ -309,9 +317,12 @@ auth.post("/login/finish", async (c) => {
 });
 
 auth.post("/logout", async (c) => {
-  const a = c.get("auth");
-  if (a?.session_id) {
-    await destroySession(c.env.DB, a.session_id);
+  // Don't gate on requireAuth — logout should be a no-op-friendly endpoint
+  // even with an expired/invalid cookie. But we MUST destroy the server-side
+  // session row, otherwise a leaked cookie remains valid for its 30-day TTL.
+  const token = getCookie(c, SESSION_COOKIE);
+  if (token) {
+    await destroySession(c.env.DB, token);
   }
   clearSessionCookie(c);
   return ok(c, { ok: true });

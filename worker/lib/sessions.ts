@@ -51,10 +51,7 @@ export async function createSession(
   };
 }
 
-export async function getSession(
-  db: D1Database,
-  token: string,
-): Promise<SessionRecord | null> {
+export async function getSession(db: D1Database, token: string): Promise<SessionRecord | null> {
   const row = await db
     .prepare(
       `SELECT id, user_id, expires_at, created_at, last_seen_at
@@ -84,9 +81,12 @@ export async function destroySession(db: D1Database, token: string): Promise<voi
 
 /** Drop expired sessions. Intended to be called from a scheduled handler or login. */
 export async function purgeExpiredSessions(db: D1Database): Promise<void> {
-  await db
-    .prepare(`DELETE FROM sessions WHERE expires_at < datetime('now')`)
-    .run();
+  // expires_at is stored as a JS ISO string (e.g. "2026-06-01T12:00:00.000Z")
+  // while datetime('now') returns "2026-05-02 12:00:00" — comparing those as
+  // TEXT is lexicographic and broken (the 'T' in ISO sorts greater than the
+  // space in datetime, so the ISO value is ALWAYS "greater"). julianday()
+  // parses both formats into a real number so the comparison actually works.
+  await db.prepare(`DELETE FROM sessions WHERE julianday(expires_at) < julianday('now')`).run();
 }
 
 export function setSessionCookie(c: Context, token: string, isLocalhost: boolean) {

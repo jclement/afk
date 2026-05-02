@@ -20,12 +20,7 @@ import { buildInviteIcs, inviteSummary } from "./ical-invite.js";
 import { renderMarkdown } from "./markdown.js";
 import { sendCalendarInvite } from "./mailgun.js";
 
-export type VacationLifecycle =
-  | "created"
-  | "updated"
-  | "cancelled"
-  | "uncancelled"
-  | "deleted";
+export type VacationLifecycle = "created" | "updated" | "cancelled" | "uncancelled" | "deleted";
 
 export async function sendVacationLifecycleEmail(
   env: Env,
@@ -73,20 +68,12 @@ export async function sendVacationLifecycleEmail(
   }
 }
 
-function subjectFor(
-  method: "PUBLISH" | "CANCEL",
-  v: Vacation,
-  cat: Category | null,
-): string {
+function subjectFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category | null): string {
   const summary = inviteSummary(cat, v);
   return method === "CANCEL" ? `Cancelled: ${summary}` : summary;
 }
 
-function plainBodyFor(
-  method: "PUBLISH" | "CANCEL",
-  v: Vacation,
-  cat: Category | null,
-): string {
+function plainBodyFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category | null): string {
   const range = describeVacation(v);
   const days = vacationDayCost(v);
   const lines: string[] = [];
@@ -108,11 +95,7 @@ function plainBodyFor(
   return lines.join("\n");
 }
 
-function htmlBodyFor(
-  method: "PUBLISH" | "CANCEL",
-  v: Vacation,
-  cat: Category | null,
-): string {
+function htmlBodyFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category | null): string {
   const range = describeVacation(v);
   const days = vacationDayCost(v);
   const lead =

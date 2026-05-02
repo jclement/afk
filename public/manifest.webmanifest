@@ -1,0 +1,17 @@
+{
+  "name": "AFK — Away From Keyboard",
+  "short_name": "AFK",
+  "description": "Personal vacation tracking. Pretty. Mobile friendly. Sarcastic.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1a",
+  "theme_color": "#0a0f1a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

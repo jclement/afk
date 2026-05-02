@@ -67,6 +67,7 @@ func GenerateAPIKey() (plaintext, hash, prefix string) {
 ## API Authentication
 
 API routes accept either:
+
 1. **Session cookie** (for browser/UI requests)
 2. **`Authorization: Bearer <api_key>`** header (for API consumers)
 
@@ -156,15 +157,15 @@ Consistent envelope format:
 
 ### Standard Error Codes
 
-| HTTP Status | Code | When |
-|-------------|------|------|
-| 400 | `VALIDATION_ERROR` | Invalid input |
-| 401 | `UNAUTHORIZED` | Missing or invalid auth |
-| 403 | `FORBIDDEN` | Valid auth, insufficient permissions |
-| 404 | `NOT_FOUND` | Resource doesn't exist |
-| 409 | `CONFLICT` | Duplicate or conflicting state |
-| 429 | `RATE_LIMITED` | Too many requests |
-| 500 | `INTERNAL_ERROR` | Server error |
+| HTTP Status | Code               | When                                 |
+| ----------- | ------------------ | ------------------------------------ |
+| 400         | `VALIDATION_ERROR` | Invalid input                        |
+| 401         | `UNAUTHORIZED`     | Missing or invalid auth              |
+| 403         | `FORBIDDEN`        | Valid auth, insufficient permissions |
+| 404         | `NOT_FOUND`        | Resource doesn't exist               |
+| 409         | `CONFLICT`         | Duplicate or conflicting state       |
+| 429         | `RATE_LIMITED`     | Too many requests                    |
+| 500         | `INTERNAL_ERROR`   | Server error                         |
 
 ## OpenAPI / Swagger Documentation
 
@@ -212,17 +213,17 @@ Or for simplicity, use a CDN-loaded single HTML page:
 ```html
 <!DOCTYPE html>
 <html>
-<head>
-  <title>API Documentation</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist/swagger-ui.css">
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist/swagger-ui-bundle.js"></script>
-  <script>
-    SwaggerUIBundle({ url: "/api/openapi.yaml", dom_id: "#swagger-ui" });
-  </script>
-</body>
+  <head>
+    <title>API Documentation</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist/swagger-ui-bundle.js"></script>
+    <script>
+      SwaggerUIBundle({ url: "/api/openapi.yaml", dom_id: "#swagger-ui" });
+    </script>
+  </body>
 </html>
 ```
 

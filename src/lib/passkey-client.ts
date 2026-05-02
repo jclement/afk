@@ -27,16 +27,13 @@ export async function registerPasskey(input: {
   display_name: string;
   nickname?: string;
 }): Promise<User> {
-  const start = await api<RegStartResponse>(
-    `${API_BASE}/auth/register/start`,
-    {
-      method: "POST",
-      json: {
-        username: input.username,
-        display_name: input.display_name,
-      },
+  const start = await api<RegStartResponse>(`${API_BASE}/auth/register/start`, {
+    method: "POST",
+    json: {
+      username: input.username,
+      display_name: input.display_name,
     },
-  );
+  });
   let response;
   try {
     response = await browserStartReg({ optionsJSON: start.options });
@@ -45,21 +42,18 @@ export async function registerPasskey(input: {
       cause: e,
     });
   }
-  const finish = await api<{ user: User }>(
-    `${API_BASE}/auth/register/finish`,
-    {
-      method: "POST",
-      json: {
-        flow_id: start.flow_id,
-        response,
-        nickname: input.nickname,
-        // Capture the browser's current IANA timezone on signup so the
-        // dashboard and accrual math start in the user's local frame
-        // without them having to find a settings page first.
-        timezone: detectBrowserTimezone(),
-      },
+  const finish = await api<{ user: User }>(`${API_BASE}/auth/register/finish`, {
+    method: "POST",
+    json: {
+      flow_id: start.flow_id,
+      response,
+      nickname: input.nickname,
+      // Capture the browser's current IANA timezone on signup so the
+      // dashboard and accrual math start in the user's local frame
+      // without them having to find a settings page first.
+      timezone: detectBrowserTimezone(),
     },
-  );
+  });
   return finish.user;
 }
 

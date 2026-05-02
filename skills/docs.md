@@ -22,6 +22,7 @@ The README is for someone who wants to **use or set up** the application. It ans
 ## Quick Start
 
 <3-5 numbered steps to get from zero to running locally>
+
 1. Clone the repo
 2. `mise install` (installs all tools)
 3. Copy config: `cp fnox.local.toml.sample fnox.local.toml`
@@ -30,27 +31,27 @@ The README is for someone who wants to **use or set up** the application. It ans
 
 ## Configuration
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `PORT` | HTTP listen port | `8080` | No |
-| `DATABASE_URL` | SQLite path or Postgres connection string | `./data/<app>.db` | No |
-| `DATABASE_DRIVER` | `sqlite` or `postgres` | `sqlite` | No |
-| `SUPPRESS_AUTH` | Skip authentication (dev only) | `false` | No |
-| `SESSION_SECRET` | Secret for session signing | — | Yes (prod) |
+| Variable          | Description                               | Default           | Required   |
+| ----------------- | ----------------------------------------- | ----------------- | ---------- |
+| `PORT`            | HTTP listen port                          | `8080`            | No         |
+| `DATABASE_URL`    | SQLite path or Postgres connection string | `./data/<app>.db` | No         |
+| `DATABASE_DRIVER` | `sqlite` or `postgres`                    | `sqlite`          | No         |
+| `SUPPRESS_AUTH`   | Skip authentication (dev only)            | `false`           | No         |
+| `SESSION_SECRET`  | Secret for session signing                | —                 | Yes (prod) |
 
 <Include ALL env vars. Update this table every time you add, change, or remove one.>
 
 ## Development
 
-| Command | What it does |
-|---------|-------------|
-| `mise run dev` | Start dev server with hot reload |
-| `mise run test` | Run all tests |
-| `mise run lint` | Lint and typecheck |
-| `mise run build` | Production build |
-| `mise run fmt` | Format all code |
-| `mise run release` | Tag and push a release |
-| `mise run dev:reset` | Blow away local dev state |
+| Command              | What it does                     |
+| -------------------- | -------------------------------- |
+| `mise run dev`       | Start dev server with hot reload |
+| `mise run test`      | Run all tests                    |
+| `mise run lint`      | Lint and typecheck               |
+| `mise run build`     | Production build                 |
+| `mise run fmt`       | Format all code                  |
+| `mise run release`   | Tag and push a release           |
+| `mise run dev:reset` | Blow away local dev state        |
 
 ## API
 
@@ -62,11 +63,11 @@ The README is for someone who wants to **use or set up** the application. It ans
 
 ### Key Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/health` | Health check (no auth) |
-| `GET` | `/api/v1/things` | List things |
-| `POST` | `/api/v1/things` | Create a thing |
+| Method | Path             | Description            |
+| ------ | ---------------- | ---------------------- |
+| `GET`  | `/api/v1/health` | Health check (no auth) |
+| `GET`  | `/api/v1/things` | List things            |
+| `POST` | `/api/v1/things` | Create a thing         |
 
 <Don't list every endpoint — just the important ones. Point to OpenAPI spec for full reference.>
 
@@ -113,13 +114,14 @@ The DESIGN.md is for someone who wants to **understand and modify** the code. It
 ### System Diagram (text)
 
 <ASCII or Mermaid diagram showing major components and data flow>
-
 ```
-Browser → [React SPA] → /api/* → [Go HTTP Server] → [SQLite/Postgres]
-                                        ↓
-                                  [Auth Middleware]
-                                        ↓
-                                  [Route Handlers]
+
+Browser → [React SPA] → /api/\* → [Go HTTP Server] → [SQLite/Postgres]
+↓
+[Auth Middleware]
+↓
+[Route Handlers]
+
 ```
 
 ## Project Structure
@@ -127,19 +129,21 @@ Browser → [React SPA] → /api/* → [Go HTTP Server] → [SQLite/Postgres]
 <Annotated tree showing every important directory with a one-line explanation>
 
 ```
-cmd/<app>/main.go          — Entry point, config loading, server startup
+
+cmd/<app>/main.go — Entry point, config loading, server startup
 internal/
-  server/server.go         — HTTP server, middleware stack, graceful shutdown
-  server/routes.go         — Route registration
-  api/                     — API handlers (one file per domain)
-  auth/                    — Authentication logic
-  store/                   — Database access layer
-  models/                  — Domain types
+server/server.go — HTTP server, middleware stack, graceful shutdown
+server/routes.go — Route registration
+api/ — API handlers (one file per domain)
+auth/ — Authentication logic
+store/ — Database access layer
+models/ — Domain types
 frontend/
-  src/routes/              — TanStack Router pages
-  src/components/          — Shared UI components
-  src/api/hooks.ts         — React Query hooks
-migrations/                — Database migrations (auto-run on startup)
+src/routes/ — TanStack Router pages
+src/components/ — Shared UI components
+src/api/hooks.ts — React Query hooks
+migrations/ — Database migrations (auto-run on startup)
+
 ```
 
 ## Key Design Decisions
@@ -159,10 +163,12 @@ migrations/                — Database migrations (auto-run on startup)
 ### Entity Relationship
 
 ```
+
 Users 1──* Sessions
 Users 1──* API Keys
 Users 1──* Things
 Things 1──* SubThings
+
 ```
 
 ### Key Tables
@@ -201,6 +207,7 @@ Things 1──* SubThings
 ## When to Update Documentation
 
 ### README.md — Update When:
+
 - Adding, changing, or removing an environment variable
 - Adding or changing a mise task
 - Changing deployment steps
@@ -208,6 +215,7 @@ Things 1──* SubThings
 - Changing the tech stack or dependencies
 
 ### DESIGN.md — Update When:
+
 - Adding a new major component or service
 - Changing the data model (new tables, changed relationships)
 - Making an architectural decision that future developers need to understand

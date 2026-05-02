@@ -11,17 +11,17 @@ You are building a command-line application. Make it beautiful in the terminal a
 
 ## Go CLI Stack
 
-| Component | Choice | Notes |
-|-----------|--------|-------|
-| **CLI parsing** | [Cobra](https://github.com/spf13/cobra) | Commands, flags, completions, help |
-| **TUI framework** | [Bubble Tea](https://github.com/charmbracelet/bubbletea) | For interactive/full-screen UIs |
-| **Styling** | [Lipgloss](https://github.com/charmbracelet/lipgloss) | Terminal CSS — colors, borders, padding |
-| **Components** | [Bubbles](https://github.com/charmbracelet/bubbles) | Pre-built: list, table, viewport, spinner, etc. |
-| **Forms/prompts** | [Huh](https://github.com/charmbracelet/huh) | Multi-step forms, confirms, selects |
-| **Config** | [Viper](https://github.com/spf13/viper) | YAML config + env vars |
-| **Database** | [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) | Pure Go SQLite, CGO=0 compatible |
-| **Logging** | [log/slog](https://pkg.go.dev/log/slog) | Stdlib structured logging |
-| **Pretty logging** | [charmbracelet/log](https://github.com/charmbracelet/log) | Colored stderr output for non-TUI subcommands |
+| Component          | Choice                                                      | Notes                                           |
+| ------------------ | ----------------------------------------------------------- | ----------------------------------------------- |
+| **CLI parsing**    | [Cobra](https://github.com/spf13/cobra)                     | Commands, flags, completions, help              |
+| **TUI framework**  | [Bubble Tea](https://github.com/charmbracelet/bubbletea)    | For interactive/full-screen UIs                 |
+| **Styling**        | [Lipgloss](https://github.com/charmbracelet/lipgloss)       | Terminal CSS — colors, borders, padding         |
+| **Components**     | [Bubbles](https://github.com/charmbracelet/bubbles)         | Pre-built: list, table, viewport, spinner, etc. |
+| **Forms/prompts**  | [Huh](https://github.com/charmbracelet/huh)                 | Multi-step forms, confirms, selects             |
+| **Config**         | [Viper](https://github.com/spf13/viper)                     | YAML config + env vars                          |
+| **Database**       | [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) | Pure Go SQLite, CGO=0 compatible                |
+| **Logging**        | [log/slog](https://pkg.go.dev/log/slog)                     | Stdlib structured logging                       |
+| **Pretty logging** | [charmbracelet/log](https://github.com/charmbracelet/log)   | Colored stderr output for non-TUI subcommands   |
 
 ### Build Rules
 
@@ -58,6 +58,7 @@ if term.IsTerminal(int(os.Stdout.Fd())) {
 ```
 
 **Every subcommand must be scriptable.** If stdout isn't a terminal:
+
 - Output plain text or structured data (JSON/CSV)
 - No spinners, no progress bars, no color codes
 - Exit codes: 0 = success, 1 = error, 2 = usage error
@@ -114,6 +115,7 @@ Same TTY detection principles apply — check `process.stdout.isTTY`.
 ## Taglines
 
 CLI apps get taglines too:
+
 - Show in `--version` output
 - Show in TUI status bar (rotating)
 - Show in `--help` header

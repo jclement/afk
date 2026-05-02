@@ -31,6 +31,16 @@ const r = new Hono<HonoVars>();
 
 r.use("*", requireAuth);
 
+/**
+ * Sanitise free-text fields that flow into iCal SUMMARY/DESCRIPTION and
+ * email Subject/body. Strip control characters (CR/LF/TAB/etc.) so a user
+ * can't smuggle line breaks into RFC822 headers or break iCal parsing.
+ */
+function sanitiseText(s: string, max: number): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/g, "").slice(0, max);
+}
+
 // ---------------------------------------------------------------------------
 // Year summary — categories with used/remaining + the vacation list.
 // ---------------------------------------------------------------------------
@@ -127,8 +137,8 @@ r.post("/", async (c) => {
     partial_amount,
   });
   if (shapeErr) return err(c, "VALIDATION_ERROR", shapeErr);
-  const public_desc = (body.public_desc ?? "").slice(0, 200);
-  const internal_desc = (body.internal_desc ?? "").slice(0, 2000);
+  const public_desc = sanitiseText(body.public_desc ?? "", 200);
+  const internal_desc = sanitiseText(body.internal_desc ?? "", 2000);
   try {
     const created = await createVacation(c.env.DB, user.id, {
       category_id,
@@ -187,10 +197,10 @@ r.patch("/:id", async (c) => {
       ...(body.category_id ? { category_id: body.category_id } : {}),
       ...merged,
       ...(body.public_desc !== undefined
-        ? { public_desc: body.public_desc.slice(0, 200) }
+        ? { public_desc: sanitiseText(body.public_desc, 200) }
         : {}),
       ...(body.internal_desc !== undefined
-        ? { internal_desc: body.internal_desc.slice(0, 2000) }
+        ? { internal_desc: sanitiseText(body.internal_desc, 2000) }
         : {}),
     });
     if (updated) {
@@ -236,8 +246,18 @@ r.delete("/:id", async (c) => {
   const ok2 = await deleteVacation(c.env.DB, user.id, id);
   if (!ok2) return err(c, "NOT_FOUND", "Vacation not found.");
   if (existing && !existing.cancelled_at) {
+    // RFC 5546 requires SEQUENCE on a CANCEL to be ≥ the last published one
+    // (most clients want strictly greater, or they'll silently ignore the
+    // cancellation). The deleteVacation path doesn't bump the row's sequence
+    // because the row is gone; bump it in-memory for the outbound email.
     c.executionCtx.waitUntil(
-      mailVacation(c.env, new URL(c.req.url).origin, user, existing, "deleted"),
+      mailVacation(
+        c.env,
+        new URL(c.req.url).origin,
+        user,
+        { ...existing, ical_sequence: existing.ical_sequence + 1 },
+        "deleted",
+      ),
     );
   }
   return ok(c, { deleted: true });
@@ -253,17 +273,11 @@ async function mailVacation(
   appOrigin: string,
   user: import("../../shared/types.js").User,
   vacation: import("../../shared/types.js").Vacation,
-  lifecycle:
-    | "created"
-    | "updated"
-    | "cancelled"
-    | "uncancelled"
-    | "deleted",
+  lifecycle: "created" | "updated" | "cancelled" | "uncancelled" | "deleted",
 ): Promise<void> {
   if (!user.email || !user.email_verified_at) return;
   const cats = await listCategories(env.DB, user.id);
-  const category: Category | null =
-    cats.find((c) => c.id === vacation.category_id) ?? null;
+  const category: Category | null = cats.find((c) => c.id === vacation.category_id) ?? null;
   await sendVacationLifecycleEmail(env, appOrigin, user, vacation, category, lifecycle);
 }
 

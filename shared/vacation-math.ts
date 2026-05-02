@@ -24,11 +24,7 @@ export function parseISODate(s: string): Date {
   }
   const [y, m, d] = s.split("-").map(Number);
   const date = new Date(Date.UTC(y!, m! - 1, d!));
-  if (
-    date.getUTCFullYear() !== y ||
-    date.getUTCMonth() !== m! - 1 ||
-    date.getUTCDate() !== d
-  ) {
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m! - 1 || date.getUTCDate() !== d) {
     throw new Error(`Invalid ISO date: ${s}`);
   }
   return date;
@@ -52,10 +48,7 @@ export function isBusinessDay(d: Date): boolean {
  * Count business days between two ISO dates, inclusive. Returns 0 if
  * `endDate` is before `startDate`. Public holidays are not subtracted.
  */
-export function businessDaysBetween(
-  startDate: string,
-  endDate: string,
-): number {
+export function businessDaysBetween(startDate: string, endDate: string): number {
   const start = parseISODate(startDate);
   const end = parseISODate(endDate);
   if (end.getTime() < start.getTime()) return 0;
@@ -63,11 +56,7 @@ export function businessDaysBetween(
   // Walk day by day. The maximum sensible vacation entry is well under a
   // year so this is fine — no need for a clever modulo formula.
   let count = 0;
-  for (
-    let t = start.getTime();
-    t <= end.getTime();
-    t += MS_PER_DAY
-  ) {
+  for (let t = start.getTime(); t <= end.getTime(); t += MS_PER_DAY) {
     if (isBusinessDay(new Date(t))) count++;
   }
   return count;
@@ -81,7 +70,9 @@ export function businessDaysBetween(
  *
  * Cancelled entries always consume 0.
  */
-export function vacationDayCost(v: Pick<Vacation, "start_date" | "end_date" | "partial_amount" | "cancelled_at">): number {
+export function vacationDayCost(
+  v: Pick<Vacation, "start_date" | "end_date" | "partial_amount" | "cancelled_at">,
+): number {
   if (v.cancelled_at) return 0;
   if (v.partial_amount != null) {
     // Partial only makes sense on a single business day.
@@ -90,6 +81,30 @@ export function vacationDayCost(v: Pick<Vacation, "start_date" | "end_date" | "p
     return v.partial_amount;
   }
   return businessDaysBetween(v.start_date, v.end_date);
+}
+
+/**
+ * Same as `vacationDayCost`, but only counts the portion of the entry that
+ * falls inside the given calendar year. A Dec 29 → Jan 2 booking would
+ * otherwise count its full 4 business days against BOTH years' allowances.
+ */
+export function vacationDayCostInYear(
+  v: Pick<Vacation, "start_date" | "end_date" | "partial_amount" | "cancelled_at">,
+  year: number,
+): number {
+  if (v.cancelled_at) return 0;
+  if (v.partial_amount != null) {
+    // Partial entries are single-day, so the year is whichever year the start
+    // date falls in.
+    if (v.start_date.slice(0, 4) !== String(year)) return 0;
+    return vacationDayCost(v);
+  }
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  if (v.end_date < yearStart || v.start_date > yearEnd) return 0;
+  const clippedStart = v.start_date < yearStart ? yearStart : v.start_date;
+  const clippedEnd = v.end_date > yearEnd ? yearEnd : v.end_date;
+  return businessDaysBetween(clippedStart, clippedEnd);
 }
 
 /**
@@ -149,8 +164,7 @@ export function yearElapsedFraction(
   } catch {
     return yearElapsedFraction(year, asOf, "UTC");
   }
-  const get = (type: string) =>
-    Number(parts!.find((p) => p.type === type)!.value);
+  const get = (type: string) => Number(parts!.find((p) => p.type === type)!.value);
   const localYear = get("year");
   if (localYear < year) return 0;
   if (localYear > year) return 1;
@@ -201,11 +215,13 @@ export function categoryUsage(
   remaining_days: number;
   over_accrual_days: number;
 } {
-  const used = vacations.reduce((sum, v) => sum + vacationDayCost(v), 0);
+  const yr = year ?? allowance?.year ?? currentYearInTimezone(tz, asOf);
+  // Clip each vacation to the year boundary so a Dec 29 → Jan 2 entry isn't
+  // double-counted into both years' allowances.
+  const used = vacations.reduce((sum, v) => sum + vacationDayCostInYear(v, yr), 0);
   const allotted = allowance?.days_allotted ?? 0;
   const carryover = allowance?.days_carryover ?? 0;
   const total = allotted + carryover;
-  const yr = year ?? allowance?.year ?? currentYearInTimezone(tz, asOf);
   const fraction = category.accrues ? yearElapsedFraction(yr, asOf, tz) : 1;
   const available = carryover + allotted * fraction;
   const overAccrual = category.accrues ? Math.max(0, used - available) : 0;
@@ -254,7 +270,13 @@ export function validateVacationShape(input: {
     if (start.getTime() !== end.getTime()) {
       return "Partial-day vacations must start and end on the same day.";
     }
-    if (input.partial_amount <= 0 || input.partial_amount > 1) {
+    // Number.isFinite catches NaN and Infinity — both slip past `<= 0 || > 1`
+    // because every comparison with NaN is false.
+    if (
+      !Number.isFinite(input.partial_amount) ||
+      input.partial_amount <= 0 ||
+      input.partial_amount > 1
+    ) {
       return "Partial amount must be between 0 (exclusive) and 1 (inclusive).";
     }
     if (!isBusinessDay(start)) {
@@ -300,8 +322,5 @@ export function describeVacation(
 export function vacationsInYear(year: number, all: Vacation[]): Vacation[] {
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
-  return all.filter(
-    (v) =>
-      !v.cancelled_at && v.start_date <= yearEnd && v.end_date >= yearStart,
-  );
+  return all.filter((v) => !v.cancelled_at && v.start_date <= yearEnd && v.end_date >= yearStart);
 }
