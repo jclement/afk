@@ -1,0 +1,17 @@
+# Local-only secrets and overrides. Copy this to `.dev.vars` (gitignored)
+# and tweak as needed. `.dev.vars` is loaded automatically by Wrangler /
+# the Cloudflare Vite plugin during local dev.
+
+# Skips passkey auth and auto-logs in as a built-in developer user.
+# NEVER set this to "true" in production. The worker logs a warning on
+# every request when it's active so you don't forget.
+SUPPRESS_AUTH = "true"
+
+# Used to sign session cookies. Generate with:
+#   openssl rand -hex 32
+SESSION_SECRET = "dev-secret-do-not-use-in-prod-please-and-thank-you"
+
+# Local relying party / origin overrides. Production values live in
+# wrangler.toml; these only matter when you change the dev host.
+RP_ID = "localhost"
+APP_ORIGIN = "http://localhost:5173"

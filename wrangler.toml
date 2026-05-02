@@ -1,0 +1,86 @@
+# Wrangler config for AFK — Away From Keyboard, the personal vacation tracker.
+#
+# Two environments:
+#   test  → workers.dev only, name `afk-test`, separate D1/KV
+#   prod  → custom domain afk.onewheelgeek.net, name `afk`, prod D1/KV
+#
+# RP_ID and APP_ORIGIN are derived from the request URL at runtime
+# (see worker/routes/auth.ts), so neither is set here.
+
+name = "afk"
+main = "worker/index.ts"
+compatibility_date = "2026-04-30"
+compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# Test — *.workers.dev only.
+# ---------------------------------------------------------------------------
+[env.test]
+name = "afk-test"
+workers_dev = true
+
+[env.test.assets]
+directory = "./dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# Worker handles API and iCal routes; asset lookup would otherwise serve the
+# SPA fallback for /api/* and break things like the PDF route.
+run_worker_first = ["/api/*", "/ical/*"]
+
+[[env.test.d1_databases]]
+binding = "DB"
+database_name = "afk-test-db"
+database_id = "30dfabaf-e4c7-444f-9313-922e22064617"
+migrations_dir = "migrations"
+
+[[env.test.kv_namespaces]]
+binding = "KV"
+id = "7cb07328927a4322b5c578a99bccfae1"
+
+[env.test.browser]
+binding = "BROWSER"
+
+[env.test.observability.logs]
+enabled = true
+
+[env.test.vars]
+RP_NAME = "AFK (test)"
+APP_VERSION = "dev"
+
+# ---------------------------------------------------------------------------
+# Production — afk.onewheelgeek.net.
+# ---------------------------------------------------------------------------
+[env.production]
+name = "afk"
+workers_dev = false
+routes = [
+  { pattern = "afk.onewheelgeek.net", custom_domain = true },
+]
+
+[env.production.assets]
+directory = "./dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# Worker handles API and iCal routes; asset lookup would otherwise serve the
+# SPA fallback for /api/* and break things like the PDF route.
+run_worker_first = ["/api/*", "/ical/*"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "afk-db"
+database_id = "1153b6f0-dedf-43ba-bae7-856bb433cba7"
+migrations_dir = "migrations"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "cba8636ecfc64b51888e6a25efb0db95"
+
+[env.production.browser]
+binding = "BROWSER"
+
+[env.production.observability.logs]
+enabled = true
+
+[env.production.vars]
+RP_NAME = "AFK"
+APP_VERSION = "dev"

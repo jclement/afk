@@ -1,0 +1,221 @@
+# AFK — Design & Architecture
+
+## Overview
+
+AFK is a single-tenant vacation tracker deployed as a single Cloudflare Worker. The same Worker
+serves the API, the React SPA, and the iCal feeds. Local state lives in D1 (SQLite at the edge).
+Passkey challenges live in KV with a TTL. PDFs are rendered via the Browser Rendering binding.
+
+The app is opinionated: you, you only, your vacation, your sarcasm. Anyone landing on a fresh
+deployment can register the first user (and only the first user) — after that, registration is
+locked and only adding additional passkeys to your own account is allowed.
+
+## Architecture
+
+```
+                 +-------------------- Cloudflare edge ---------------------+
+                 |                                                          |
+  Browser  --->  |  Worker (Hono)                                           |
+                 |   ├── /api/v1/* ── auth, categories, vacations, ical,    |
+                 |   │                pdf, passkeys, health                 |
+                 |   ├── /ical/:tok ── public-facing iCal feeds             |
+                 |   └── ASSETS    ── React SPA (Vite build)                |
+                 |        │                                                 |
+                 |        ├── D1 (DB)        users, sessions, categories,   |
+                 |        │                  allowances, vacations,         |
+                 |        │                  credentials, ical_tokens       |
+                 |        ├── KV (KV)        WebAuthn challenges (5m TTL)   |
+                 |        └── Browser        Headless Chrome for PDF        |
+                 +----------------------------------------------------------+
+```
+
+In dev, Vite's dev server runs the SPA with HMR and the `@cloudflare/vite-plugin` runs the Worker
+inside Workerd in the same process. Workers bindings are declared in `wrangler.toml` and the dev
+server points at local D1/KV via Miniflare under the hood.
+
+## Project Structure
+
+```
+worker/
+  index.ts                — Hono app entry, secure-headers, route mounting
+  types.ts                — Env binding types
+  lib/
+    auth.ts               — requireAuth middleware + SUPPRESS_AUTH support
+    sessions.ts           — server-side session CRUD + cookie helpers
+    users.ts              — user upsert, dev-user bootstrap
+    passkeys.ts           — SimpleWebAuthn flows (start/finish for both reg + auth)
+    store.ts              — categories, allowances, vacations, iCal tokens, credentials
+    responses.ts          — `ok` / `err` JSON envelope helpers
+    ids.ts                — UUID + token generators, constant-time comparison
+    print-template.ts     — server-rendered HTML for PDF export
+  routes/
+    auth.ts               — register/login/logout + status
+    categories.ts         — categories + allowances
+    vacations.ts          — entries + year summary
+    passkeys.ts           — list/rename/delete passkeys
+    ical.ts               — feed tokens (auth) + public feed routes (no auth)
+    pdf.ts                — Browser Rendering invocation
+  test-utils.ts           — applyMigrations, createTestSession, authedFetch helpers
+  *.test.ts               — Vitest integration tests in the Workers pool
+
+shared/
+  types.ts                — types shared between worker and frontend
+  vacation-math.ts        — pure functions for accounting (heavily unit-tested)
+  colors.ts               — category palette + stable-color picker
+  taglines.ts             — 200+ sarcastic one-liners
+
+src/                      — React SPA
+  main.tsx                — entry, QueryClient, RouterProvider
+  app.css                 — Tailwind v4 theme + utility classes + components
+  api/hooks.ts            — TanStack Query hooks for every endpoint
+  lib/
+    api.ts                — fetch wrapper + APIError class
+    passkey-client.ts     — browser-side WebAuthn flows
+    theme.ts              — system/light/dark cycle
+  routes/                 — TanStack Router file-based routes
+    __root.tsx            — auth-redirect logic + app shell
+    index.tsx             — dashboard (year picker, widgets, list)
+    login.tsx             — passkey sign-in
+    setup.tsx             — first-run setup
+    settings.tsx          — categories, passkeys, iCal feeds
+  components/             — Header, Modal, BookingModal, CategoryWidget, VacationList
+
+migrations/0001_initial.sql  — schema (run by Wrangler in CI, by helpers in tests)
+```
+
+## Key Design Decisions
+
+1. **Single Worker, single binary.** No separate API + frontend. The Worker serves both, which
+   means same-origin (no CORS), one deploy, and the React app can talk to `/api/v1` without
+   thinking. The Cloudflare Vite plugin makes this as ergonomic in dev as in prod.
+
+2. **D1 for everything except WebAuthn challenges.** Sessions, categories, and vacations all
+   benefit from durable, queryable storage. WebAuthn challenges are *intrinsically* short-lived
+   (5 min) and tied to a one-shot flow id, so KV's TTL fits perfectly and we get automatic GC.
+
+3. **Server-side sessions, not JWTs.** The cookie carries a token; the row in `sessions` is the
+   source of truth. Logout revokes instantly. No "token blacklists" to maintain.
+
+4. **One user, but a real user model.** "Personal" doesn't mean "skip auth". Categories and
+   vacations are scoped by `user_id` so an IDOR test (see `vacations.test.ts`) can prove
+   isolation. If two people ever share a deployment, they're isolated by default.
+
+5. **Days are the unit of accounting.** Categories *display* in either days or weeks (1 week =
+   5 business days). Allowances and used totals are stored in days. The conversion lives in
+   `shared/vacation-math.ts` so the worker, the React app, and the PDF template all agree.
+
+6. **Three vacation shapes.** Multi-day full, single full, single partial. Anything else is
+   rejected at the API layer (`validateVacationShape`). This keeps the math simple and the UI
+   honest.
+
+7. **iCal scopes.** The `private` token reveals everything. The `public` token reveals only the
+   `public_desc`. Tests verify the leak-prevention contract — see `ical.test.ts`.
+
+8. **PDF via `setContent`.** We render the HTML in-Worker and hand the string to puppeteer's
+   `page.setContent`, which sidesteps the auth-bounce issue you'd hit if puppeteer navigated to
+   a URL on the same Worker. No round-trip, no second auth flow.
+
+9. **Stable colors.** New categories pick the first unused color from `CATEGORY_PALETTE`, then
+   that color is persisted with the category. Renaming or moving a category never reshuffles
+   the palette — important for charts and PDFs to stay visually consistent.
+
+## Data Model
+
+```
+users 1──* sessions
+users 1──* credentials       (passkeys)
+users 1──* categories
+users 1──* allowances        (one per category-year pair)
+users 1──* vacations
+users 1──* ical_tokens
+
+categories 1──* allowances
+categories 1──* vacations
+```
+
+| Table | Purpose | Notable columns |
+|-------|---------|-----------------|
+| `users` | Account record | `username`, `display_name`, `role` |
+| `sessions` | Active sessions | `id` (token), `expires_at`, `last_seen_at` |
+| `credentials` | WebAuthn passkeys | `id` (cred id), `public_key`, `counter`, `transports`, `nickname` |
+| `categories` | User-defined categories | `unit` (`days`/`weeks`), `color`, `archived` |
+| `allowances` | Per-year, per-category budgets | `year`, `days_allotted`, `days_carryover` |
+| `vacations` | Entries | `start_date`, `end_date`, `partial_amount`, `cancelled_at` |
+| `ical_tokens` | Calendar feed tokens | `scope` (`private`/`public`), `label`, `last_used_at` |
+
+## Authentication Flow
+
+### First-run setup
+1. Browser hits `/api/v1/auth/status` and receives `has_users: false`.
+2. Frontend redirects to `/setup` and POSTs `{username, display_name}` to `/api/v1/auth/register/start`.
+3. Worker calls `generateRegistrationOptions` and stashes the challenge under a fresh `flow_id`
+   in KV with a 5-minute TTL.
+4. Browser invokes `navigator.credentials.create()` via `@simplewebauthn/browser`.
+5. Browser POSTs `{flow_id, response, nickname}` to `/finish`. Worker verifies, creates the
+   user (admin), inserts the credential, seeds default categories (`Vacation`, `Flex`), creates
+   a session, and sets the cookie.
+
+### Subsequent login
+1. Browser POSTs optional `{username}` to `/login/start`. Worker returns assertion options.
+2. Browser invokes `navigator.credentials.get()`.
+3. Browser POSTs `{flow_id, response}` to `/login/finish`. Worker verifies, updates the
+   credential's counter, creates a session, sets the cookie.
+
+### SUPPRESS_AUTH
+When `SUPPRESS_AUTH=true` (only in dev), `requireAuth` short-circuits and forges a built-in
+admin user (`developer` / id `00000000-...`). Logs a warning every request so it's hard to ship
+this on by accident.
+
+## API Patterns
+
+- **Envelope:** `{ data: ... }` on success, `{ error: { message, code } }` on failure.
+- **Error codes:** machine-readable strings (`VALIDATION_ERROR`, `UNAUTHORIZED`, etc.) plus
+  matching HTTP statuses. Helper in `worker/lib/responses.ts`.
+- **Validation:** server-side via plain TypeScript checks. Strict input shapes, length caps on
+  free text. The vacation-shape validator (`validateVacationShape`) lives in `shared/` and runs
+  in both the worker and the React app for instant feedback.
+- **Year scoping:** the dashboard summary endpoint accepts `:year` and auto-creates an
+  allowance row if one doesn't exist yet so the UI always has something to render.
+
+## Frontend Patterns
+
+- **TanStack Router file-based routes.** `src/routes/` files are the routes. `__root.tsx` is the
+  shell. Auth redirects happen in the root component using a `useEffect` that watches
+  `useAuthStatus` + `useMe`.
+- **TanStack Query everywhere.** Every server interaction goes through a hook in
+  `src/api/hooks.ts`. Mutations invalidate the relevant query keys on success.
+- **No camelCase mapping layer.** API responses are snake_case, types are snake_case. The
+  database shape is the API shape is the React state shape. Saves a translation tax.
+- **Tailwind v4.** No config file, just `@import "tailwindcss"` in `app.css` and `@theme`
+  blocks. Semantic color tokens (`--color-surface`, `--color-heading`, etc.) flip via the
+  `.dark` class on `<html>`.
+
+## Testing Strategy
+
+- **`shared/*.test.ts`** — pure-function tests for vacation math and color palette. Fast.
+- **`worker/*.test.ts`** — integration tests using `@cloudflare/vitest-pool-workers`. Each test
+  file resets the in-memory D1 via `applyMigrations()`. We test the real Hono app end-to-end
+  through `app.fetch(new Request(...))`.
+- **`e2e/`** — Playwright. Runs against the dev server in `SUPPRESS_AUTH=true` mode so we don't
+  have to dance with WebAuthn in headless Chrome.
+
+The IDOR test in `worker/vacations.test.ts` is load-bearing: it proves a different user cannot
+read, cancel, or delete another user's vacation.
+
+## Known Limitations & Future Work
+
+- **Office 365 calendar OAuth.** Bonus on the wishlist. Not yet implemented — start with the
+  iCal feed, escalate to push-style sync only if we ever feel the pain.
+- **Mailgun notifications + boss notifications.** Stubbed for the future. Schema doesn't track
+  a "manager" yet.
+- **Public holidays.** We treat any Mon-Fri as a business day, ignoring statutory holidays. For
+  most use cases the user works around them by splitting an entry; we may add a per-user
+  holiday list later.
+- **Browser Rendering availability.** The PDF endpoint returns a clear 503 when the binding
+  isn't configured (e.g. local dev). Use `?html=1` to preview the source. Fix: either pay for
+  Browser Rendering on the local plan or add Wrangler's local browser shim.
+- **Multi-user.** The schema supports it; the registration flow and the UI do not. Any second
+  registration attempt is blocked by `auth.ts`.
+- **Session secret.** `SESSION_SECRET` is reserved but currently unused — sessions rely on
+  unguessable random IDs (256 bits) and a server-side row. We'd need this if we ever switched
+  to signed cookies.

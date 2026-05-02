@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------- */
+/*  Theme tokens                                                          */
+/* ---------------------------------------------------------------------- */
+@theme {
+  --color-primary: #2563eb;
+  --color-primary-dark: #1d4ed8;
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+}
+
+/* Light/dark semantic tokens. The `.dark` class on <html> flips the values. */
+:root {
+  --color-surface: #ffffff;
+  --color-surface-alt: #f9fafb;
+  --color-heading: #111827;
+  --color-body: #374151;
+  --color-subtle: #4b5563;
+  --color-muted: #9ca3af;
+  --color-border: #e5e7eb;
+  --color-hover: #f1f5f9;
+  --color-selected: #eff6ff;
+}
+:root.dark {
+  --color-surface: #0f172a;
+  --color-surface-alt: #0a0f1a;
+  --color-heading: #f9fafb;
+  --color-body: #e5e7eb;
+  --color-subtle: #d1d5db;
+  --color-muted: #6b7280;
+  --color-border: #1f2937;
+  --color-hover: #1e293b;
+  --color-selected: #172554;
+}
+
+@layer base {
+  body {
+    background: var(--color-surface-alt);
+    color: var(--color-body);
+    font-family: var(--font-sans);
+  }
+  ::selection {
+    background: var(--color-primary);
+    color: white;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/*  Utility classes                                                        */
+/* ---------------------------------------------------------------------- */
+@layer utilities {
+  .bg-surface { background-color: var(--color-surface); }
+  .bg-surface-alt { background-color: var(--color-surface-alt); }
+  .bg-hover { background-color: var(--color-hover); }
+  .bg-selected { background-color: var(--color-selected); }
+  .text-heading { color: var(--color-heading); }
+  .text-body { color: var(--color-body); }
+  .text-subtle { color: var(--color-subtle); }
+  .text-muted { color: var(--color-muted); }
+  .border-subtle { border-color: var(--color-border); }
+}
+
+/* ---------------------------------------------------------------------- */
+/*  Components                                                             */
+/* ---------------------------------------------------------------------- */
+
+.btn {
+  @apply inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-semibold transition;
+}
+.btn-primary {
+  @apply bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary-dark)];
+}
+.btn-secondary {
+  @apply bg-[color:var(--color-surface)] border border-[color:var(--color-border)] text-[color:var(--color-body)] hover:bg-[color:var(--color-hover)];
+}
+.btn-danger {
+  @apply bg-[color:var(--color-danger)] text-white hover:opacity-90;
+}
+.btn:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+.input,
+.select,
+.textarea {
+  @apply w-full rounded border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2.5 py-1.5 text-sm text-[color:var(--color-heading)];
+}
+.input:focus,
+.select:focus,
+.textarea:focus {
+  @apply outline-none ring-1 ring-[color:var(--color-primary)] border-[color:var(--color-primary)];
+}
+
+.label {
+  @apply block text-xs font-medium text-[color:var(--color-subtle)] mb-1;
+}
+
+.card {
+  @apply rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-sm;
+}
+
+.pill {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide text-white;
+}
+
+/* Marquee animation for the header tagline */
+@keyframes marquee {
+  from { transform: translateX(0%); }
+  to { transform: translateX(-50%); }
+}
+.marquee-track {
+  animation: marquee 36s linear infinite;
+}
+
+/* Mobile safe areas */
+.safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
