@@ -25,12 +25,15 @@ export interface JsonExport {
   exported_at: string;
   app: { name: "AFK"; version: string };
   user: {
+    id: string;
     username: string;
     display_name: string;
     role: "user" | "admin";
     email: string | null;
     email_verified_at: string | null;
     timezone: string;
+    created_at: string;
+    last_login_at: string | null;
   };
   categories: Category[];
   allowances: Allowance[];
@@ -51,12 +54,15 @@ export function buildJsonExport(input: {
     exported_at: now.toISOString(),
     app: { name: "AFK", version: input.appVersion },
     user: {
+      id: input.user.id,
       username: input.user.username,
       display_name: input.user.display_name,
       role: input.user.role,
       email: input.user.email,
       email_verified_at: input.user.email_verified_at,
       timezone: input.user.timezone,
+      created_at: input.user.created_at,
+      last_login_at: input.user.last_login_at,
     },
     categories: input.categories,
     allowances: input.allowances,

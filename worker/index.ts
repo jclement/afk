@@ -114,11 +114,26 @@ export default {
   // Daily housekeeping — drop expired sessions and email-verification tokens
   // so D1 doesn't accumulate dead rows forever. Wired up via [triggers] in
   // wrangler.toml.
+  //
+  // Each task is wrapped so a single failure doesn't take down the others,
+  // and start/end log lines leave breadcrumbs in `wrangler tail`. Without
+  // these, a silently-broken cron leaves no trace until the symptom (D1
+  // bloat, lingering invitations) shows up weeks later.
   async scheduled(_event, env, ctx) {
+    const run = async (name: string, fn: () => Promise<unknown>) => {
+      const t0 = Date.now();
+      try {
+        await fn();
+        console.log(`[cron] ${name} ok in ${Date.now() - t0}ms`);
+      } catch (e) {
+        console.error(`[cron] ${name} failed in ${Date.now() - t0}ms`, e);
+      }
+    };
     ctx.waitUntil(
-      Promise.all([purgeExpiredSessions(env.DB), purgeExpiredEmailVerifications(env.DB)]).then(
-        () => undefined,
-      ),
+      Promise.allSettled([
+        run("purgeExpiredSessions", () => purgeExpiredSessions(env.DB)),
+        run("purgeExpiredEmailVerifications", () => purgeExpiredEmailVerifications(env.DB)),
+      ]).then(() => undefined),
     );
   },
 } satisfies ExportedHandler<HonoVars["Bindings"]>;

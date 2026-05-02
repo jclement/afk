@@ -6,6 +6,7 @@
  */
 
 import type { D1Database, KVNamespace, Fetcher } from "@cloudflare/workers-types";
+import type { User } from "../shared/types.js";
 
 export interface Env {
   DB: D1Database;
@@ -38,15 +39,10 @@ export interface BrowserBinding {
 }
 
 export interface AuthContext {
-  user: {
-    id: string;
-    username: string;
-    display_name: string;
-    role: "user" | "admin";
-    email: string | null;
-    email_verified_at: string | null;
-    timezone: string;
-  };
+  // Re-use the canonical User shape rather than duplicating the column list
+  // — duplicating it meant the type drifted every time we added a column
+  // (created_at, last_login_at, etc.).
+  user: User;
   session_id: string | null; // null when SUPPRESS_AUTH is forging a dev user
 }
 

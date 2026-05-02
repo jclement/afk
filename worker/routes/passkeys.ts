@@ -9,8 +9,16 @@
 import { Hono } from "hono";
 import type { HonoVars } from "../types.js";
 import { authedUser, requireAuth } from "../lib/auth.js";
-import { err, ok } from "../lib/responses.js";
+import { err, ok, readJson } from "../lib/responses.js";
 import { deletePasskey, listPasskeys, renamePasskey } from "../lib/store.js";
+
+/** Strip control chars from passkey nicknames so a CR/LF can't break the
+ * settings list layout. Defense in depth — JSX escapes already protect
+ * against XSS, but layout corruption is still a footgun. */
+function sanitiseNickname(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x1F\x7F]+/g, " ").trim();
+}
 
 const r = new Hono<HonoVars>();
 
@@ -24,8 +32,8 @@ r.get("/", async (c) => {
 r.patch("/:id", async (c) => {
   const user = authedUser(c);
   const id = c.req.param("id");
-  const body = await c.req.json<{ nickname?: string }>();
-  const nickname = (body.nickname ?? "").trim();
+  const body = await readJson<{ nickname?: string }>(c);
+  const nickname = sanitiseNickname(body.nickname ?? "");
   if (!nickname || nickname.length > 60) {
     return err(c, "VALIDATION_ERROR", "Nickname is required (max 60 chars).");
   }

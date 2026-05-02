@@ -33,3 +33,17 @@ const STATUS_BY_CODE: Record<ErrorCode, 400 | 401 | 403 | 404 | 409 | 429 | 500 
 export function err(c: Context, code: ErrorCode, message: string) {
   return c.json({ error: { message, code } }, STATUS_BY_CODE[code]);
 }
+
+/**
+ * Parse a JSON request body, returning `{}` on any parse error rather than
+ * letting the SyntaxError bubble up as a generic 500. Use this for any
+ * route that reads `c.req.json()` — a malformed body should be a 400 from
+ * the route's own validation, not a confusing internal error.
+ */
+export async function readJson<T>(c: Context): Promise<Partial<T>> {
+  try {
+    return ((await c.req.json<T>()) ?? {}) as Partial<T>;
+  } catch {
+    return {} as Partial<T>;
+  }
+}

@@ -123,25 +123,27 @@ migrations/0001_initial.sql  — schema (run by Wrangler in CI, by helpers in te
 
 ```
 users 1──* sessions
-users 1──* credentials       (passkeys)
+users 1──* credentials          (passkeys)
 users 1──* categories
-users 1──* allowances        (one per category-year pair)
+users 1──* allowances           (one per category-year pair)
 users 1──* vacations
 users 1──* ical_tokens
+users 1──* email_verifications  (in-flight verification links, 24h TTL)
 
 categories 1──* allowances
 categories 1──* vacations
 ```
 
-| Table         | Purpose                        | Notable columns                                                   |
-| ------------- | ------------------------------ | ----------------------------------------------------------------- |
-| `users`       | Account record                 | `username`, `display_name`, `role`                                |
-| `sessions`    | Active sessions                | `id` (token), `expires_at`, `last_seen_at`                        |
-| `credentials` | WebAuthn passkeys              | `id` (cred id), `public_key`, `counter`, `transports`, `nickname` |
-| `categories`  | User-defined categories        | `unit` (`days`/`weeks`), `color`, `archived`                      |
-| `allowances`  | Per-year, per-category budgets | `year`, `days_allotted`, `days_carryover`                         |
-| `vacations`   | Entries                        | `start_date`, `end_date`, `partial_amount`, `cancelled_at`        |
-| `ical_tokens` | Calendar feed tokens           | `scope` (`private`/`public`), `label`, `last_used_at`             |
+| Table                 | Purpose                          | Notable columns                                                                               |
+| --------------------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
+| `users`               | Account record                   | `username`, `display_name`, `role`, `email`, `email_verified_at`, `timezone`, `last_login_at` |
+| `sessions`            | Active sessions                  | `id` (token), `expires_at`, `last_seen_at`                                                    |
+| `credentials`         | WebAuthn passkeys                | `id` (cred id), `public_key`, `counter`, `transports`, `nickname`                             |
+| `categories`          | User-defined categories          | `accrues`, `color`, `archived`, `sort_order`                                                  |
+| `allowances`          | Per-year, per-category budgets   | `year`, `days_allotted`, `days_carryover`, `notes`                                            |
+| `vacations`           | Entries                          | `start_date`, `end_date`, `partial_amount`, `cancelled_at`, `ical_sequence`                   |
+| `ical_tokens`         | Calendar feed tokens             | `scope` (`private`/`public`), `label`, `last_used_at`                                         |
+| `email_verifications` | Pending email-verification links | `token` (32-byte hex), `email`, `expires_at` (24h)                                            |
 
 ## Authentication Flow
 
@@ -152,9 +154,14 @@ categories 1──* vacations
 3. Worker calls `generateRegistrationOptions` and stashes the challenge under a fresh `flow_id`
    in KV with a 5-minute TTL.
 4. Browser invokes `navigator.credentials.create()` via `@simplewebauthn/browser`.
-5. Browser POSTs `{flow_id, response, nickname}` to `/finish`. Worker verifies, creates the
-   user (admin), inserts the credential, seeds default categories (`Vacation`, `Flex`), creates
-   a session, and sets the cookie.
+5. Browser POSTs `{flow_id, response, nickname, timezone}` to `/finish`. Worker re-runs the
+   registration gate (existing-username branch must be the requester), creates the user
+   (`role: "admin"` if `userCount === 0`, else `"user"`), inserts the credential, seeds default
+   categories (`Vacation`, `Flex`), creates a session, and sets the cookie.
+
+Open multi-user signup is intentional. Anyone can pick an unused username and register; the only
+gated branch is "username already exists" — in that case the requester must already be signed in
+as that user (otherwise anyone could attach a new passkey to a known account).
 
 ### Subsequent login
 
@@ -217,8 +224,40 @@ read, cancel, or delete another user's vacation.
 - **Browser Rendering availability.** The PDF endpoint returns a clear 503 when the binding
   isn't configured (e.g. local dev). Use `?html=1` to preview the source. Fix: either pay for
   Browser Rendering on the local plan or add Wrangler's local browser shim.
-- **Multi-user.** The schema supports it; the registration flow and the UI do not. Any second
-  registration attempt is blocked by `auth.ts`.
+- **Multi-user.** Schema, registration, and UI all support it. First user becomes admin, rest are
+  role `user`. The only gated registration branch is "username already taken" — that requires the
+  requester to already be signed in as that user (prevents passkey-attachment impersonation).
+- **Office 365 calendar OAuth.** See first bullet — still wishlist.
+
+## Email + calendar invites
+
+Outbound email goes through Mailgun's HTTP API (`/v3/{domain}/messages.mime` for invites,
+`/messages` for verification). The MIME message is hand-built (`worker/lib/mailgun.ts`) so the
+calendar part can carry `Content-Type: text/calendar; method=PUBLISH|CANCEL` — that's what makes
+Outlook show "Add to calendar." Mailgun secrets are loaded via `wrangler secret put`; an unset
+key cleanly degrades to `console.warn` so dev/test environments don't need credentials.
+
+The user adds their email in Settings, gets a verification link via Mailgun (24h, single-use,
+256-bit token), and from then on every vacation create / update / cancel emits a calendar
+invite to themselves with a stable UID (`{vacation.id}@afk`) and a monotonically-increasing
+`SEQUENCE`. The same UID + sequence pattern keeps Outlook/Apple/Google in sync.
+
+## Data export
+
+`GET /api/v1/me/export.json` returns a complete dump of every user-owned table (profile,
+categories, allowances, vacations) in a stable JSON envelope (`schema_version: 1`). `export.csv`
+is a flat vacations-with-category-info view with computed day costs, RFC 4180-compliant. The
+schema lives in `worker/lib/export.ts` and is the single source of truth — see CLAUDE.md
+"Data Export Contract" for the rules around extending it when new columns/tables are added.
+
+## Daily cron
+
+`wrangler.toml [env.*.triggers]` runs `worker/index.ts#scheduled` daily at 04:00 UTC. Two
+purges: expired session rows (`sessions.expires_at < now`) and expired email-verification
+tokens. Both compare via `julianday()` because the stored ISO timestamps don't sort
+lexicographically against SQLite's `datetime('now')` format. Each task is wrapped so a single
+failure doesn't take down the other, and start/end log lines leave breadcrumbs in `wrangler tail`.
+
 - **Session secret.** `SESSION_SECRET` is reserved but currently unused — sessions rely on
   unguessable random IDs (256 bits) and a server-side row. We'd need this if we ever switched
   to signed cookies.

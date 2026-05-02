@@ -52,10 +52,19 @@ function SetupPage() {
     <div className="flex-1 flex items-center justify-center px-4 py-8">
       <div className="card w-full max-w-md p-6">
         <div className="text-center mb-6">
-          <div className="text-2xl font-bold text-heading tracking-tight">
+          <h1 className="text-2xl font-bold text-heading tracking-tight">
             {isFirstUser ? "Welcome to AFK" : "Create your account"}
-          </div>
+          </h1>
           <div className="text-xs text-muted italic mt-1">{pickTagline("setup")}</div>
+          {isFirstUser && (
+            <p className="text-xs text-subtle mt-3">
+              You're the first one in — this account becomes the admin.
+            </p>
+          )}
+          <p className="text-xs text-subtle mt-2">
+            When you click below, your device will ask to save a passkey (Touch&nbsp;ID,
+            Face&nbsp;ID, Windows&nbsp;Hello, or your phone). No password to remember.
+          </p>
         </div>
         <form onSubmit={handleSubmit} className="grid gap-3">
           <div>

@@ -9,7 +9,7 @@ import type { User } from "../../shared/types.js";
 export const DEV_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 const SELECT_USER =
-  "SELECT id, username, display_name, role, email, email_verified_at, timezone FROM users";
+  "SELECT id, username, display_name, role, email, email_verified_at, timezone, created_at, last_login_at FROM users";
 
 export async function getUser(db: D1Database, id: string): Promise<User | null> {
   return await db.prepare(`${SELECT_USER} WHERE id = ?`).bind(id).first<User>();
@@ -42,15 +42,11 @@ export async function createUser(
     )
     .bind(id, input.username, input.display_name, role, timezone)
     .run();
-  return {
-    id,
-    username: input.username,
-    display_name: input.display_name,
-    role,
-    email: null,
-    email_verified_at: null,
-    timezone,
-  };
+  // Re-read so the returned User has the DB-populated created_at, rather
+  // than us inventing it client-side and risking drift.
+  const created = await getUser(db, id);
+  if (!created) throw new Error("User insert succeeded but row missing.");
+  return created;
 }
 
 /** Upsert the developer user used by SUPPRESS_AUTH. */
@@ -64,15 +60,9 @@ export async function ensureDevUser(db: D1Database): Promise<User> {
     )
     .bind(DEV_USER_ID, "developer", "Developer", "admin")
     .run();
-  return {
-    id: DEV_USER_ID,
-    username: "developer",
-    display_name: "Developer",
-    role: "admin",
-    email: null,
-    email_verified_at: null,
-    timezone: "UTC",
-  };
+  const created = await getUser(db, DEV_USER_ID);
+  if (!created) throw new Error("Dev user insert failed.");
+  return created;
 }
 
 /**

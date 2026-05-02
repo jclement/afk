@@ -74,15 +74,22 @@ function RootComponent() {
   if (status.isLoading || me.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-alt">
-        <div className="text-sm text-muted animate-pulse">Loading…</div>
+        <div className="text-sm text-muted animate-pulse" role="status" aria-live="polite">
+          Loading…
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen flex flex-col bg-surface-alt">
+      {/* Skip link is the first focusable element so a keyboard user can
+          bypass the header on every page. Visually hidden until focused. */}
+      <a href="#main" className="skip-link">
+        Skip to main content
+      </a>
       {me.data && <Header user={me.data} />}
-      <main className="flex-1 flex flex-col">
+      <main id="main" className="flex-1 flex flex-col">
         <Outlet />
       </main>
       <footer className="text-xs text-muted text-center py-3 safe-bottom flex flex-col items-center gap-1">

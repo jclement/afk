@@ -32,6 +32,10 @@ export function useAuthStatus() {
   return useQuery({
     queryKey: ["auth", "status"],
     queryFn: () => api<AuthStatus>(`${API_BASE}/auth/status`),
+    // Refetch on focus so a tab returning to the foreground after a long
+    // delay notices that another tab logged in/out.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -47,6 +51,11 @@ export function useMe(opts?: { enabled?: boolean }) {
       }
     },
     enabled: opts?.enabled ?? true,
+    // Treat as stale immediately + refetch on focus — sessions can disappear
+    // (logout in another tab, expiry, cookie cleared) and we want the UI to
+    // catch up the moment the user comes back to the tab.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -54,7 +63,13 @@ export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api(`${API_BASE}/auth/logout`, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries(),
+    onSuccess: () => {
+      // Drop everything rather than refetch — every cached query is about
+      // to 401 anyway, and refetching just churns the network on the way
+      // out. The next page mount will re-fetch what it needs.
+      qc.removeQueries();
+      qc.setQueryData(["auth", "me"], null);
+    },
   });
 }
 
@@ -200,7 +215,11 @@ export function useYearSummary(year: number) {
   });
 }
 
-export function useCreateVacation(year: number) {
+// Vacation mutations invalidate ALL year summaries — a Dec 30 → Jan 3 entry
+// affects two years' totals, and a category/allowance change can ripple too.
+// React Query's prefix-match makes ["summary"] cover ["summary", N] for any N.
+
+export function useCreateVacation(_year: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: {
@@ -211,11 +230,11 @@ export function useCreateVacation(year: number) {
       public_desc: string;
       internal_desc: string;
     }) => api<Vacation>(`${API_BASE}/vacations`, { method: "POST", json: body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary"] }),
   });
 }
 
-export function useUpdateVacation(year: number) {
+export function useUpdateVacation(_year: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string } & Record<string, unknown>) =>
@@ -223,33 +242,33 @@ export function useUpdateVacation(year: number) {
         method: "PATCH",
         json: body,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary"] }),
   });
 }
 
-export function useCancelVacation(year: number) {
+export function useCancelVacation(_year: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
       api<Vacation>(`${API_BASE}/vacations/${id}/cancel`, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary"] }),
   });
 }
 
-export function useUncancelVacation(year: number) {
+export function useUncancelVacation(_year: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
       api<Vacation>(`${API_BASE}/vacations/${id}/uncancel`, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary"] }),
   });
 }
 
-export function useDeleteVacation(year: number) {
+export function useDeleteVacation(_year: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api(`${API_BASE}/vacations/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary", year] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["summary"] }),
   });
 }
 

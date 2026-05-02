@@ -382,24 +382,41 @@ export async function updateVacation(
       .first<{ id: string }>();
     if (!owns) throw new Error("Category not found.");
   }
-  // Allowlist: never interpolate object keys into SQL without one. Today's
-  // callers all pass typed keys, but a future caller spreading user input
-  // would otherwise be a SQLi vector.
-  const ALLOWED_KEYS = new Set([
-    "category_id",
-    "start_date",
-    "end_date",
-    "partial_amount",
-    "public_desc",
-    "internal_desc",
-    "cancelled_at",
-  ]);
+  // Per-key allowlist: each known field is bound with the right runtime
+  // type. Iterating Object.entries with `as never` would (a) interpolate
+  // unknown keys into SQL (SQLi vector if a future caller spreads user
+  // input) and (b) silently push wrong-typed values (a stringified number,
+  // an object) into the bind. Explicit beats clever.
   const fields: string[] = ["updated_at = datetime('now')", "ical_sequence = ical_sequence + 1"];
   const vals: (string | number | null)[] = [];
-  for (const [k, v] of Object.entries(patch)) {
-    if (!ALLOWED_KEYS.has(k)) continue;
-    fields.push(`${k} = ?`);
-    vals.push(v as never);
+  if (patch.category_id !== undefined) {
+    fields.push("category_id = ?");
+    vals.push(patch.category_id);
+  }
+  if (patch.start_date !== undefined) {
+    fields.push("start_date = ?");
+    vals.push(patch.start_date);
+  }
+  if (patch.end_date !== undefined) {
+    fields.push("end_date = ?");
+    vals.push(patch.end_date);
+  }
+  if (patch.partial_amount !== undefined) {
+    const n = patch.partial_amount;
+    fields.push("partial_amount = ?");
+    vals.push(n === null ? null : Number.isFinite(n) ? n : null);
+  }
+  if (patch.public_desc !== undefined) {
+    fields.push("public_desc = ?");
+    vals.push(patch.public_desc);
+  }
+  if (patch.internal_desc !== undefined) {
+    fields.push("internal_desc = ?");
+    vals.push(patch.internal_desc);
+  }
+  if (patch.cancelled_at !== undefined) {
+    fields.push("cancelled_at = ?");
+    vals.push(patch.cancelled_at);
   }
   vals.push(id, userId);
   await db
@@ -409,13 +426,19 @@ export async function updateVacation(
   return await getVacation(db, userId, id);
 }
 
+/**
+ * Cancel a vacation. Returns `{ vacation, changed }` so the caller can skip
+ * sending another CANCEL email when the row was already cancelled (a
+ * double-click otherwise spams the mailbox and burns Mailgun quota).
+ */
 export async function cancelVacation(
   db: D1Database,
   userId: string,
   id: string,
-): Promise<Vacation | null> {
+): Promise<{ vacation: Vacation; changed: boolean } | null> {
   const existing = await getVacation(db, userId, id);
   if (!existing) return null;
+  if (existing.cancelled_at) return { vacation: existing, changed: false };
   await db
     .prepare(
       `UPDATE vacations
@@ -426,16 +449,18 @@ export async function cancelVacation(
     )
     .bind(id, userId)
     .run();
-  return await getVacation(db, userId, id);
+  const updated = await getVacation(db, userId, id);
+  return updated ? { vacation: updated, changed: true } : null;
 }
 
 export async function uncancelVacation(
   db: D1Database,
   userId: string,
   id: string,
-): Promise<Vacation | null> {
+): Promise<{ vacation: Vacation; changed: boolean } | null> {
   const existing = await getVacation(db, userId, id);
   if (!existing) return null;
+  if (!existing.cancelled_at) return { vacation: existing, changed: false };
   await db
     .prepare(
       `UPDATE vacations
@@ -446,7 +471,8 @@ export async function uncancelVacation(
     )
     .bind(id, userId)
     .run();
-  return await getVacation(db, userId, id);
+  const updated = await getVacation(db, userId, id);
+  return updated ? { vacation: updated, changed: true } : null;
 }
 
 export async function deleteVacation(db: D1Database, userId: string, id: string): Promise<boolean> {
@@ -518,18 +544,28 @@ export async function deleteICalToken(
 export async function findUserByICalToken(
   db: D1Database,
   token: string,
-): Promise<{ user_id: string; scope: "private" | "public" } | null> {
+): Promise<{
+  token_id: string;
+  user_id: string;
+  scope: "private" | "public";
+} | null> {
   const row = await db
-    .prepare(`SELECT user_id, scope FROM ical_tokens WHERE token = ?`)
+    .prepare(`SELECT id AS token_id, user_id, scope FROM ical_tokens WHERE token = ?`)
     .bind(token)
-    .first<{ user_id: string; scope: "private" | "public" }>();
-  if (!row) return null;
-  // Update last_used asynchronously — not awaited by the caller via wait_until.
+    .first<{ token_id: string; user_id: string; scope: "private" | "public" }>();
+  return row ?? null;
+}
+
+/**
+ * Stamp `last_used_at` on a feed token. Run via `executionCtx.waitUntil` from
+ * the public-feed handler — a transient D1 write failure mustn't 500 a feed
+ * the calendar client already successfully read.
+ */
+export async function touchICalTokenLastUsed(db: D1Database, tokenId: string): Promise<void> {
   await db
-    .prepare(`UPDATE ical_tokens SET last_used_at = datetime('now') WHERE token = ?`)
-    .bind(token)
+    .prepare(`UPDATE ical_tokens SET last_used_at = datetime('now') WHERE id = ?`)
+    .bind(tokenId)
     .run();
-  return row;
 }
 
 // ---------------------------------------------------------------------------

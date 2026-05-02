@@ -38,12 +38,17 @@ function WelcomePage() {
 function Hero() {
   return (
     <section className="relative overflow-hidden">
-      {/* Soft gradient backdrop, theme-aware */}
+      {/* Soft gradient backdrop, theme-aware. Two backgrounds — first is the
+          flat surface color (always honoured), second is the color-mix gradient
+          (Chrome 111+, Safari 16.2+, Firefox 113+). On unsupporting browsers
+          the gradient is dropped silently and we still get a solid surface,
+          rather than a transparent rectangle. */}
       <div
-        className="absolute inset-0 -z-10 opacity-90"
+        aria-hidden="true"
+        className="absolute inset-0 -z-10 opacity-90 bg-surface-alt"
         style={{
           background:
-            "radial-gradient(ellipse at top left, color-mix(in srgb, var(--color-primary) 18%, transparent), transparent 60%), radial-gradient(ellipse at bottom right, color-mix(in srgb, var(--color-success) 14%, transparent), transparent 55%)",
+            "radial-gradient(ellipse at top left, color-mix(in srgb, var(--color-primary) 18%, transparent), transparent 60%), radial-gradient(ellipse at bottom right, color-mix(in srgb, var(--color-success) 14%, transparent), transparent 55%), var(--color-surface-alt)",
         }}
       />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16 sm:py-24 text-center">

@@ -37,14 +37,18 @@ mise run dev
 
 ## Configuration
 
-| Variable         | Description                                                                            | Default                        | Required   |
-| ---------------- | -------------------------------------------------------------------------------------- | ------------------------------ | ---------- |
-| `RP_ID`          | WebAuthn relying-party ID (host name)                                                  | `afk.onewheelgeek.net`         | Yes (prod) |
-| `RP_NAME`        | WebAuthn relying-party name (shown in OS UI)                                           | `AFK`                          | Yes        |
-| `APP_ORIGIN`     | Origin URL used for WebAuthn + iCal feed URLs                                          | `https://afk.onewheelgeek.net` | Yes        |
-| `APP_VERSION`    | Version string returned by `/api/v1/health`                                            | `dev`                          | No         |
-| `SESSION_SECRET` | Reserved for future signed cookies                                                     | –                              | No (yet)   |
-| `SUPPRESS_AUTH`  | When `"true"`, skip auth and auto-login as a built-in dev user. **NEVER set in prod.** | (unset)                        | No         |
+| Variable          | Description                                                                              | Default                        | Required           |
+| ----------------- | ---------------------------------------------------------------------------------------- | ------------------------------ | ------------------ |
+| `RP_ID`           | WebAuthn relying-party ID (derived from request hostname per-request)                    | _(request hostname)_           | No                 |
+| `RP_NAME`         | WebAuthn relying-party name (shown in OS UI)                                             | `AFK`                          | Yes                |
+| `APP_ORIGIN`      | Origin URL used for iCal feed URLs                                                       | `https://afk.onewheelgeek.net` | Yes                |
+| `APP_VERSION`     | Version string returned by `/api/v1/health` (CI sets this from git describe)             | `dev`                          | No                 |
+| `SESSION_SECRET`  | Reserved for future signed cookies                                                       | –                              | No (yet)           |
+| `SUPPRESS_AUTH`   | When `"true"`, skip auth and auto-login as a built-in dev user. **NEVER set in prod.**   | (unset)                        | No                 |
+| `MAILGUN_API_KEY` | Mailgun API key. Set via `wrangler secret put MAILGUN_API_KEY --env <test\|production>`. | (unset → emails skipped)       | For email/invites  |
+| `MAILGUN_DOMAIN`  | Mailgun sending domain (e.g. `mg.example.com`)                                           | –                              | If MAILGUN_API_KEY |
+| `MAILGUN_REGION`  | `us` or `eu`                                                                             | `us`                           | No                 |
+| `MAILGUN_FROM`    | RFC 5322 `From:` header on outbound mail                                                 | `AFK <afk@MAILGUN_DOMAIN>`     | No                 |
 
 Local secrets live in `.dev.vars` (gitignored). Production values live in
 `wrangler.toml [env.production.vars]` plus `wrangler secret put` for sensitive ones.
@@ -53,10 +57,11 @@ Local secrets live in `.dev.vars` (gitignored). Production values live in
 
 Defined in `wrangler.toml`:
 
-- **D1** — `DB` — stores users, credentials, sessions, categories, allowances, vacations, iCal tokens
+- **D1** — `DB` — stores users, credentials, sessions, categories, allowances, vacations, iCal tokens, email verifications
 - **KV** — `KV` — stores WebAuthn challenges with a 5-minute TTL
 - **Browser Rendering** — `BROWSER` — renders the year-summary PDF
 - **Assets** — `ASSETS` — serves the built React SPA (production)
+- **Cron Trigger** — daily 04:00 UTC, purges expired sessions and email-verification tokens
 
 ## Development
 
@@ -84,23 +89,29 @@ programmatic clients aren't supported (it's a personal app).
 
 ### Key endpoints
 
-| Method                        | Path                                                | Description                                   |
-| ----------------------------- | --------------------------------------------------- | --------------------------------------------- |
-| `GET`                         | `/api/v1/health`                                    | Liveness probe — no auth                      |
-| `GET`                         | `/api/v1/auth/status`                               | First-run check (`has_users`)                 |
-| `GET`                         | `/api/v1/auth/me`                                   | Current user (or 401)                         |
-| `POST`                        | `/api/v1/auth/register/start` & `/finish`           | Passkey registration                          |
-| `POST`                        | `/api/v1/auth/login/start` & `/finish`              | Passkey authentication                        |
-| `POST`                        | `/api/v1/auth/logout`                               | Destroy session                               |
-| `GET` `POST` `PATCH` `DELETE` | `/api/v1/categories[/:id]`                          | Category CRUD                                 |
-| `GET` `PUT`                   | `/api/v1/categories/allowances/:year[/:categoryId]` | Allowance per year                            |
-| `GET`                         | `/api/v1/vacations/summary/:year`                   | Year summary (widgets + list)                 |
-| `POST` `PATCH`                | `/api/v1/vacations[/:id]`                           | Vacation CRUD                                 |
-| `POST`                        | `/api/v1/vacations/:id/cancel`                      | Soft-cancel a vacation                        |
-| `GET` `POST` `DELETE`         | `/api/v1/passkeys[/:id]`                            | Manage passkeys                               |
-| `GET` `POST` `DELETE`         | `/api/v1/ical-tokens[/:id]`                         | Manage iCal feed tokens                       |
-| `GET`                         | `/api/v1/pdf/:year`                                 | Render year summary as PDF                    |
-| `GET`                         | `/ical/:token.ics`                                  | Public-facing iCal feed (token-authenticated) |
+| Method                        | Path                                                | Description                                        |
+| ----------------------------- | --------------------------------------------------- | -------------------------------------------------- |
+| `GET`                         | `/api/v1/health`                                    | Liveness probe — no auth                           |
+| `GET`                         | `/api/v1/auth/status`                               | First-run check (`has_users`)                      |
+| `GET`                         | `/api/v1/auth/me`                                   | Current user (or 401)                              |
+| `POST`                        | `/api/v1/auth/register/start` & `/finish`           | Passkey registration                               |
+| `POST`                        | `/api/v1/auth/login/start` & `/finish`              | Passkey authentication                             |
+| `POST`                        | `/api/v1/auth/logout`                               | Destroy session                                    |
+| `GET` `POST` `PATCH` `DELETE` | `/api/v1/categories[/:id]`                          | Category CRUD                                      |
+| `GET` `PUT`                   | `/api/v1/categories/allowances/:year[/:categoryId]` | Allowance per year                                 |
+| `GET`                         | `/api/v1/vacations/summary/:year`                   | Year summary (widgets + list)                      |
+| `POST` `PATCH`                | `/api/v1/vacations[/:id]`                           | Vacation CRUD                                      |
+| `POST`                        | `/api/v1/vacations/:id/cancel`                      | Soft-cancel a vacation                             |
+| `GET` `POST` `DELETE`         | `/api/v1/passkeys[/:id]`                            | Manage passkeys                                    |
+| `GET` `POST` `DELETE`         | `/api/v1/ical-tokens[/:id]`                         | Manage iCal feed tokens                            |
+| `GET`                         | `/api/v1/pdf/:year`                                 | Render year summary as PDF                         |
+| `PATCH` `DELETE`              | `/api/v1/me/email`                                  | Set / clear email (triggers verification mail)     |
+| `POST`                        | `/api/v1/me/email/resend`                           | Resend the email-verification link                 |
+| `PATCH`                       | `/api/v1/me/timezone`                               | Update IANA timezone                               |
+| `GET`                         | `/api/v1/me/export.json`                            | Full data dump (categories, allowances, vacations) |
+| `GET`                         | `/api/v1/me/export.csv`                             | Vacations as a flat CSV with category info         |
+| `GET`                         | `/ical/:token.ics`                                  | Public-facing iCal feed (token-authenticated)      |
+| `GET`                         | `/verify-email/:token`                              | Email-verification redirect (link from inbox)      |
 
 ## Deployment
 

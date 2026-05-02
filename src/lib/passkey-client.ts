@@ -22,11 +22,27 @@ interface AuthStartResponse {
   suppressed?: boolean;
 }
 
+/**
+ * Probe the WebAuthn API. Old browsers, locked-down enterprise WebViews, and
+ * some embedded browsers (Facebook in-app, etc.) don't ship the API at all —
+ * we want to give those users a friendly explanation rather than a
+ * stack-trace-y "TypeError: ... is undefined" surfaced through React Query.
+ */
+function assertWebAuthnSupported(): void {
+  if (typeof window === "undefined") return;
+  if (!("PublicKeyCredential" in window) || !window.navigator?.credentials) {
+    throw new Error(
+      "Your browser doesn't support passkeys. Try the latest Safari, Chrome, Firefox, or Edge.",
+    );
+  }
+}
+
 export async function registerPasskey(input: {
   username: string;
   display_name: string;
   nickname?: string;
 }): Promise<User> {
+  assertWebAuthnSupported();
   const start = await api<RegStartResponse>(`${API_BASE}/auth/register/start`, {
     method: "POST",
     json: {
@@ -66,6 +82,7 @@ function detectBrowserTimezone(): string {
 }
 
 export async function loginWithPasskey(username?: string): Promise<User> {
+  assertWebAuthnSupported();
   const start = await api<AuthStartResponse>(`${API_BASE}/auth/login/start`, {
     method: "POST",
     json: username ? { username } : {},

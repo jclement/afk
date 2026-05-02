@@ -61,28 +61,36 @@ function DashboardPage() {
 
   return (
     <div className="max-w-5xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col gap-4">
+      {/* Visually-hidden h1 for screen-reader users — the year picker doubles
+          as the visual title. Document outline rule: every page gets one h1. */}
+      <h1 className="sr-only">Dashboard — {year}</h1>
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="inline-flex items-center bg-surface border border-subtle rounded">
           <button
             type="button"
             onClick={() => setYear(year - 1)}
-            className="p-2 hover:bg-hover"
+            className="p-2 hover:bg-hover min-w-[40px] min-h-[40px] flex items-center justify-center"
             aria-label="Previous year"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-4 h-4" aria-hidden="true" />
           </button>
-          <div className="px-3 py-2 text-sm font-semibold text-heading flex items-center gap-2">
-            <Calendar className="w-4 h-4" />
+          <div
+            className="px-3 py-2 text-sm font-semibold text-heading flex items-center gap-2"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <Calendar className="w-4 h-4" aria-hidden="true" />
+            <span className="sr-only">Year:</span>
             {year}
           </div>
           <button
             type="button"
             onClick={() => setYear(year + 1)}
-            className="p-2 hover:bg-hover"
+            className="p-2 hover:bg-hover min-w-[40px] min-h-[40px] flex items-center justify-center"
             aria-label="Next year"
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className="w-4 h-4" aria-hidden="true" />
           </button>
         </div>
         <div className="flex-1" />

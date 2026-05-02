@@ -23,30 +23,34 @@ export function Header({ user }: { user: User }) {
       </Link>
       <span className="hidden sm:block text-xs text-gray-400 italic">Away From Keyboard</span>
       <div className="flex-1" />
-      <Link
-        to="/"
-        className="px-2 py-1 text-xs rounded text-gray-300 hover:bg-gray-800 hover:text-white inline-flex items-center gap-1.5"
-        activeProps={{ className: "bg-gray-700 text-white" }}
-      >
-        <Calendar className="w-4 h-4" />
-        <span className="hidden sm:inline">Dashboard</span>
-      </Link>
-      <Link
-        to="/settings"
-        className="px-2 py-1 text-xs rounded text-gray-300 hover:bg-gray-800 hover:text-white inline-flex items-center gap-1.5"
-        activeProps={{ className: "bg-gray-700 text-white" }}
-      >
-        <Settings className="w-4 h-4" />
-        <span className="hidden sm:inline">Settings</span>
-      </Link>
+      <nav aria-label="Primary" className="flex items-center gap-1">
+        <Link
+          to="/"
+          className="px-2 py-1 text-xs rounded text-gray-300 hover:bg-gray-800 hover:text-white inline-flex items-center gap-1.5 min-h-[40px]"
+          activeProps={{ className: "bg-gray-700 text-white" }}
+        >
+          <Calendar className="w-4 h-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Dashboard</span>
+          <span className="sr-only sm:hidden">Dashboard</span>
+        </Link>
+        <Link
+          to="/settings"
+          className="px-2 py-1 text-xs rounded text-gray-300 hover:bg-gray-800 hover:text-white inline-flex items-center gap-1.5 min-h-[40px]"
+          activeProps={{ className: "bg-gray-700 text-white" }}
+        >
+          <Settings className="w-4 h-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Settings</span>
+          <span className="sr-only sm:hidden">Settings</span>
+        </Link>
+      </nav>
       <button
         type="button"
         onClick={cycle}
-        className="p-1.5 rounded hover:bg-gray-800 text-gray-300 hover:text-white"
-        aria-label={`Theme: ${pref}`}
+        className="p-2 rounded hover:bg-gray-800 text-gray-300 hover:text-white min-w-[40px] min-h-[40px] flex items-center justify-center"
+        aria-label={`Theme: ${pref}. Activate to change.`}
         title={`Theme: ${pref}`}
       >
-        <ThemeIcon className="w-4 h-4" />
+        <ThemeIcon className="w-4 h-4" aria-hidden="true" />
       </button>
       <div className="hidden sm:flex items-center text-xs text-gray-300 px-1">@{user.username}</div>
       <button
@@ -56,11 +60,11 @@ export function Header({ user }: { user: User }) {
             onSuccess: () => navigate({ to: "/login" }),
           })
         }
-        className="p-1.5 rounded hover:bg-gray-800 text-gray-300 hover:text-white"
+        className="p-2 rounded hover:bg-gray-800 text-gray-300 hover:text-white min-w-[40px] min-h-[40px] flex items-center justify-center"
         aria-label="Log out"
         title="Log out"
       >
-        <LogOut className="w-4 h-4" />
+        <LogOut className="w-4 h-4" aria-hidden="true" />
       </button>
     </header>
   );

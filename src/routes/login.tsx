@@ -43,7 +43,7 @@ function LoginPage() {
     <div className="flex-1 flex items-center justify-center px-4">
       <div className="card w-full max-w-sm p-6">
         <div className="text-center mb-6">
-          <div className="text-2xl font-bold text-heading tracking-tight">AFK</div>
+          <h1 className="text-2xl font-bold text-heading tracking-tight">AFK</h1>
           <div className="text-xs text-muted italic mt-1">{pickTagline()}</div>
         </div>
         <form onSubmit={handleLogin} className="grid gap-3">
@@ -65,7 +65,11 @@ function LoginPage() {
             <KeyRound className="w-4 h-4" />
             {busy ? "Negotiating with your authenticator…" : "Sign in with passkey"}
           </button>
-          {error && <div className="text-sm text-[color:var(--color-danger)]">{error}</div>}
+          {error && (
+            <div role="alert" className="text-sm text-[color:var(--color-danger)]">
+              {error}
+            </div>
+          )}
         </form>
 
         <div className="mt-5 pt-4 border-t border-subtle text-center text-sm">

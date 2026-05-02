@@ -12,10 +12,15 @@
  */
 
 import { Hono } from "hono";
-import ical, { ICalCalendarMethod } from "ical-generator";
+import ical, {
+  ICalCalendarMethod,
+  ICalEventBusyStatus,
+  ICalEventStatus,
+  ICalEventTransparency,
+} from "ical-generator";
 import type { HonoVars } from "../types.js";
 import { authedUser, requireAuth } from "../lib/auth.js";
-import { err, ok } from "../lib/responses.js";
+import { err, ok, readJson } from "../lib/responses.js";
 import {
   createICalToken,
   deleteICalToken,
@@ -23,10 +28,16 @@ import {
   listAllVacations,
   listCategories,
   listICalTokens,
+  touchICalTokenLastUsed,
 } from "../lib/store.js";
 import { getUser } from "../lib/users.js";
 import { newICalToken } from "../lib/ids.js";
 import { parseISODate } from "../../shared/vacation-math.js";
+
+/** Token format gate: 24-byte hex (48 chars). Reject before hitting D1 to
+ * avoid burning reads on bogus probes and to give a constant-time response
+ * for malformed input. Mirror the format `newICalToken()` produces. */
+const ICAL_TOKEN_RE = /^[0-9a-f]{48}$/;
 
 // ---------------------------------------------------------------------------
 // Authenticated management
@@ -41,15 +52,17 @@ tokensApi.get("/", async (c) => {
 
 tokensApi.post("/", async (c) => {
   const user = authedUser(c);
-  const body = await c.req.json<{
-    scope?: "private" | "public";
-    label?: string;
-  }>();
+  const body = await readJson<{ scope?: "private" | "public"; label?: string }>(c);
   const scope = body.scope;
   if (scope !== "private" && scope !== "public") {
     return err(c, "VALIDATION_ERROR", "Scope must be 'private' or 'public'.");
   }
-  const label = (body.label ?? "").trim().slice(0, 60);
+
+  const label = (body.label ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1F\x7F]+/g, " ")
+    .trim()
+    .slice(0, 60);
   const token = newICalToken();
   try {
     await createICalToken(c.env.DB, user.id, { scope, label, token });
@@ -82,10 +95,25 @@ feedApi.get("/:token", async (c) => {
   const raw = c.req.param("token");
   const token = raw.endsWith(".ics") ? raw.slice(0, -4) : raw;
 
+  // Format-gate before the DB lookup. Bogus probes (empty, wrong length,
+  // non-hex) get a constant-time 404 with no D1 cost.
+  if (!ICAL_TOKEN_RE.test(token)) {
+    return c.text("Calendar feed not found.", 404);
+  }
+
   const lookup = await findUserByICalToken(c.env.DB, token);
   if (!lookup) {
     return c.text("Calendar feed not found.", 404);
   }
+  // Stamp last_used_at out-of-band — calendar clients poll every 15 min and
+  // a transient D1 write failure shouldn't 500 the feed they already
+  // successfully read.
+  c.executionCtx.waitUntil(
+    touchICalTokenLastUsed(c.env.DB, lookup.token_id).catch((e) =>
+      console.error("[ical] touch last_used failed", e),
+    ),
+  );
+
   const user = await getUser(c.env.DB, lookup.user_id);
   if (!user) {
     return c.text("Calendar feed not found.", 404);
@@ -94,6 +122,7 @@ feedApi.get("/:token", async (c) => {
   const catsById = new Map(cats.map((cat) => [cat.id, cat]));
   const vacations = await listAllVacations(c.env.DB, user.id);
 
+  const origin = new URL(c.req.url).hostname;
   const cal = ical({
     name:
       lookup.scope === "private"
@@ -104,12 +133,15 @@ feedApi.get("/:token", async (c) => {
         ? "Personal vacation feed (full detail)."
         : "Public vacation feed for sharing with team and manager.",
     timezone: "UTC",
+    // Hint to clients to poll every 15 minutes. Without this, Apple Calendar
+    // defaults to weekly refresh — bookings would take a week to appear on
+    // a colleague's calendar.
+    ttl: 900,
     method: ICalCalendarMethod.PUBLISH,
-    prodId: { company: "AFK", product: "afk", language: "EN" },
+    prodId: { company: origin, product: "afk-vacation-tracker", language: "EN" },
   });
 
   for (const v of vacations) {
-    if (v.cancelled_at) continue;
     const start = parseISODate(v.start_date);
     // iCal all-day events are end-exclusive — bump end by 1 day.
     const endInclusive = parseISODate(v.end_date);
@@ -123,18 +155,30 @@ feedApi.get("/:token", async (c) => {
       lookup.scope === "private"
         ? buildPrivateDescription(v, cat?.name ?? null)
         : v.public_desc || "Out of Office";
+    // Cancelled vacations: emit the event with STATUS:CANCELLED + a
+    // strictly-greater SEQUENCE so subscribed calendars (Apple/Google/
+    // Outlook) reliably remove it. Silently dropping the row was unreliable
+    // — clients sometimes leave the old event hanging for days.
     cal.createEvent({
       id: `${v.id}@afk`,
+      sequence: v.ical_sequence,
       start,
       end: endExclusive,
       allDay: true,
       summary,
       description,
+      status: v.cancelled_at ? ICalEventStatus.CANCELLED : ICalEventStatus.CONFIRMED,
+      busystatus: v.cancelled_at ? ICalEventBusyStatus.FREE : ICalEventBusyStatus.OOF,
+      transparency: v.cancelled_at
+        ? ICalEventTransparency.TRANSPARENT
+        : ICalEventTransparency.OPAQUE,
     });
   }
   const headers = new Headers({
     "Content-Type": "text/calendar; charset=utf-8",
-    "Cache-Control": "private, max-age=120",
+    // 15 min matches the TTL hint above. Calendar clients poll on their own
+    // schedule; this just protects against accidental tight polling.
+    "Cache-Control": "private, max-age=900",
     "Content-Disposition": `attachment; filename="afk-${lookup.scope}.ics"`,
   });
   return new Response(cal.toString(), { headers });

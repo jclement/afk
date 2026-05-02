@@ -62,6 +62,10 @@ export async function sendCalendarInvite(
     method: "POST",
     headers: { Authorization: `Basic ${auth}` },
     body: form,
+    // Cap the upstream call at 10s. Without this, a stalled Mailgun fetch
+    // burns the Worker's wall-time budget waiting for a response that's
+    // never coming, and any request piggy-backed via waitUntil dies with it.
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
     const body = await res.text();
@@ -100,6 +104,7 @@ export async function sendPlainEmail(
     method: "POST",
     headers: { Authorization: `Basic ${auth}` },
     body: form,
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
     const body = await res.text();

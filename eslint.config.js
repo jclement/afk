@@ -35,6 +35,8 @@ export default [
         crypto: "readonly",
         TextEncoder: "readonly",
         TextDecoder: "readonly",
+        AbortSignal: "readonly",
+        AbortController: "readonly",
         queueMicrotask: "readonly",
         HTMLElement: "readonly",
         HTMLDivElement: "readonly",

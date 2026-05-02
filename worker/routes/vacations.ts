@@ -6,7 +6,7 @@
 import { Hono } from "hono";
 import type { HonoVars } from "../types.js";
 import { authedUser, requireAuth } from "../lib/auth.js";
-import { err, ok } from "../lib/responses.js";
+import { err, ok, readJson } from "../lib/responses.js";
 import {
   cancelVacation,
   createVacation,
@@ -113,14 +113,14 @@ r.get("/", async (c) => {
 
 r.post("/", async (c) => {
   const user = authedUser(c);
-  const body = await c.req.json<{
+  const body = await readJson<{
     category_id?: string;
     start_date?: string;
     end_date?: string;
     partial_amount?: number | null;
     public_desc?: string;
     internal_desc?: string;
-  }>();
+  }>(c);
   const category_id = body.category_id ?? "";
   const start_date = body.start_date ?? "";
   const end_date = body.end_date ?? "";
@@ -171,14 +171,14 @@ r.patch("/:id", async (c) => {
   const existing = await getVacation(c.env.DB, user.id, id);
   if (!existing) return err(c, "NOT_FOUND", "Vacation not found.");
 
-  const body = await c.req.json<{
+  const body = await readJson<{
     category_id?: string;
     start_date?: string;
     end_date?: string;
     partial_amount?: number | null;
     public_desc?: string;
     internal_desc?: string;
-  }>();
+  }>(c);
   const merged = {
     start_date: body.start_date ?? existing.start_date,
     end_date: body.end_date ?? existing.end_date,
@@ -217,23 +217,29 @@ r.patch("/:id", async (c) => {
 r.post("/:id/cancel", async (c) => {
   const user = authedUser(c);
   const id = c.req.param("id");
-  const updated = await cancelVacation(c.env.DB, user.id, id);
-  if (!updated) return err(c, "NOT_FOUND", "Vacation not found.");
-  c.executionCtx.waitUntil(
-    mailVacation(c.env, new URL(c.req.url).origin, user, updated, "cancelled"),
-  );
-  return ok(c, updated);
+  const result = await cancelVacation(c.env.DB, user.id, id);
+  if (!result) return err(c, "NOT_FOUND", "Vacation not found.");
+  // Only fire the CANCEL email when state actually changed — a double-click
+  // shouldn't spam the user's calendar with duplicate cancellations.
+  if (result.changed) {
+    c.executionCtx.waitUntil(
+      mailVacation(c.env, new URL(c.req.url).origin, user, result.vacation, "cancelled"),
+    );
+  }
+  return ok(c, result.vacation);
 });
 
 r.post("/:id/uncancel", async (c) => {
   const user = authedUser(c);
   const id = c.req.param("id");
-  const updated = await uncancelVacation(c.env.DB, user.id, id);
-  if (!updated) return err(c, "NOT_FOUND", "Vacation not found.");
-  c.executionCtx.waitUntil(
-    mailVacation(c.env, new URL(c.req.url).origin, user, updated, "uncancelled"),
-  );
-  return ok(c, updated);
+  const result = await uncancelVacation(c.env.DB, user.id, id);
+  if (!result) return err(c, "NOT_FOUND", "Vacation not found.");
+  if (result.changed) {
+    c.executionCtx.waitUntil(
+      mailVacation(c.env, new URL(c.req.url).origin, user, result.vacation, "uncancelled"),
+    );
+  }
+  return ok(c, result.vacation);
 });
 
 r.delete("/:id", async (c) => {

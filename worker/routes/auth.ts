@@ -144,7 +144,11 @@ auth.post("/register/start", async (c) => {
       .json<{ username?: string; display_name?: string }>()
       .catch(() => ({}) as { username?: string; display_name?: string })) ?? {};
   const username = (body.username ?? "").trim().toLowerCase();
-  const displayName = (body.display_name ?? "").trim();
+  // Strip control chars from display_name — same defense-in-depth as
+  // category names. The field flows into iCal calendar names, PDF
+  // headers, and email Subject lines; CR/LF in there breaks formatting.
+  // eslint-disable-next-line no-control-regex
+  const displayName = (body.display_name ?? "").replace(/[\x00-\x1F\x7F]+/g, " ").trim();
   if (!username || username.length > 64 || !/^[a-z0-9._-]+$/.test(username)) {
     return err(c, "VALIDATION_ERROR", "Username must be 1-64 chars of [a-z0-9._-].");
   }

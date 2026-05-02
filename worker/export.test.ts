@@ -60,13 +60,19 @@ describe("data export", () => {
       expect(body.exported_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect((body.app as { name: string }).name).toBe("AFK");
 
-      // User profile (sans id and credentials)
+      // User profile (full — including id, created_at, last_login_at).
+      // Per the Data Export Contract, every user-data column the DB stores
+      // must round-trip. Only secrets (passkey public keys, session tokens,
+      // verification tokens, ical-feed tokens) are excluded.
       const u = body.user as Record<string, unknown>;
+      expect(u.id).toBe(user.id);
       expect(u.username).toBe(user.username);
       expect(u.display_name).toBe(user.display_name);
       expect(u.role).toBeDefined();
       expect(u.timezone).toBeDefined();
-      expect("id" in u).toBe(false);
+      expect(u.created_at).toBeDefined();
+      // last_login_at populated by createSession in the test helper.
+      expect(u.last_login_at).toBeDefined();
 
       // Every user-data table is present.
       // ⚠️  ADD A NEW ASSERTION HERE WHEN YOU ADD A NEW TABLE — see CLAUDE.md

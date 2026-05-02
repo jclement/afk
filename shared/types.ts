@@ -14,6 +14,10 @@ export interface User {
   email_verified_at: string | null;
   /** IANA timezone name, e.g. "America/Vancouver". "UTC" if unset. */
   timezone: string;
+  /** When the user was first created. ISO 8601 (TEXT in SQLite). */
+  created_at: string;
+  /** Most recent successful login. Null until the first login. */
+  last_login_at: string | null;
 }
 
 export interface Category {

@@ -14,6 +14,8 @@ const user: User = {
   email: "alice@example.com",
   email_verified_at: "2026-01-01",
   timezone: "UTC",
+  created_at: "2026-01-01T00:00:00Z",
+  last_login_at: null,
 };
 
 const cat: Category = {
