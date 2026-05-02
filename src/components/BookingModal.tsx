@@ -205,12 +205,15 @@ export function BookingModal({ open, year, editing, onClose }: Props) {
           <label className="label">Internal description (just for you)</label>
           <textarea
             className="textarea"
-            rows={3}
-            placeholder="Booked the cabin. Bringing the dog. Don't tell Greg."
-            maxLength={1000}
+            rows={4}
+            placeholder={"Booked the cabin. Bringing the dog. Don't tell Greg.\n\nMarkdown works: **bold**, _italic_, lists, [links](https://…)."}
+            maxLength={2000}
             value={internalDesc}
             onChange={(e) => setInternalDesc(e.target.value)}
           />
+          <div className="text-[11px] text-muted mt-1">
+            Markdown supported. Used as the body of the calendar invite emailed to you.
+          </div>
         </div>
         {error && (
           <div className="text-sm text-[color:var(--color-danger)]">{error}</div>

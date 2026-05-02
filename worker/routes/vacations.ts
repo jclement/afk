@@ -127,7 +127,7 @@ r.post("/", async (c) => {
   });
   if (shapeErr) return err(c, "VALIDATION_ERROR", shapeErr);
   const public_desc = (body.public_desc ?? "").slice(0, 200);
-  const internal_desc = (body.internal_desc ?? "").slice(0, 1000);
+  const internal_desc = (body.internal_desc ?? "").slice(0, 2000);
   try {
     const created = await createVacation(c.env.DB, user.id, {
       category_id,
@@ -189,7 +189,7 @@ r.patch("/:id", async (c) => {
         ? { public_desc: body.public_desc.slice(0, 200) }
         : {}),
       ...(body.internal_desc !== undefined
-        ? { internal_desc: body.internal_desc.slice(0, 1000) }
+        ? { internal_desc: body.internal_desc.slice(0, 2000) }
         : {}),
     });
     if (updated) {

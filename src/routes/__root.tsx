@@ -25,26 +25,28 @@ function RootComponent() {
   const me = useMe();
 
   const onAuthRoute = location.pathname === "/login" || location.pathname === "/setup";
-  // /about is public — accessible whether or not the visitor is signed in.
-  const onPublicRoute = location.pathname === "/about";
+  // Public routes — no auth, no auto-redirect away. /welcome is the marketing
+  // landing page; /about is the privacy/no-guarantees page.
+  const onPublicRoute =
+    location.pathname === "/about" || location.pathname === "/welcome";
 
   useEffect(() => {
     if (!status.data || me.isLoading) return;
-    if (onPublicRoute) return;
     // First-ever visitor (no users yet) lands on the create-account screen.
     if (!status.data.has_users && location.pathname !== "/setup") {
       navigate({ to: "/setup", replace: true });
       return;
     }
-    // Unauthenticated visitor on a protected route → send them to login.
-    // /setup is allowed for anyone wanting to create a new account.
-    if (status.data.has_users && !me.data && !onAuthRoute) {
-      navigate({ to: "/login", replace: true });
+    // Already signed in → don't loiter on auth or marketing screens.
+    if (me.data && (onAuthRoute || location.pathname === "/welcome")) {
+      navigate({ to: "/", replace: true });
       return;
     }
-    // Already signed in → don't loiter on auth screens.
-    if (me.data && onAuthRoute) {
-      navigate({ to: "/", replace: true });
+    if (onPublicRoute) return;
+    // Unauthenticated visitor on a protected route → send them to the
+    // marketing landing page, not straight to the login form.
+    if (status.data.has_users && !me.data && !onAuthRoute) {
+      navigate({ to: "/welcome", replace: true });
     }
   }, [status.data, me.data, me.isLoading, location.pathname, navigate, onAuthRoute, onPublicRoute]);
 

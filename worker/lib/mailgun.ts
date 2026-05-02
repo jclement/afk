@@ -24,8 +24,11 @@ export async function sendCalendarInvite(
     to: string;
     subject: string;
     text: string;
+    /** Optional HTML alternative — when set, recipient clients render this
+     *  instead of the plain text body. */
+    html?: string;
     ics: string;
-    method: "REQUEST" | "CANCEL";
+    method: "PUBLISH" | "CANCEL";
   },
 ): Promise<SendResult> {
   if (!env.MAILGUN_API_KEY) {
@@ -46,6 +49,7 @@ export async function sendCalendarInvite(
     to: opts.to,
     subject: opts.subject,
     text: opts.text,
+    html: opts.html,
     ics: opts.ics,
     method: opts.method,
   });
@@ -118,8 +122,9 @@ function buildMime(opts: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   ics: string;
-  method: "REQUEST" | "CANCEL";
+  method: "PUBLISH" | "CANCEL";
 }): string {
   // RFC822 wants CRLF, base64 chunked at 76 chars. We hand-roll it because
   // the Worker runtime has no MIME library and the format is short.
@@ -151,6 +156,16 @@ function buildMime(opts: {
   lines.push("");
   lines.push(toQuotedPrintable(opts.text));
   lines.push("");
+
+  // alt: text/html when supplied — most clients prefer HTML over plain.
+  if (opts.html) {
+    lines.push(`--${boundaryAlt}`);
+    lines.push(`Content-Type: text/html; charset=UTF-8`);
+    lines.push(`Content-Transfer-Encoding: base64`);
+    lines.push("");
+    lines.push(chunkBase64(toBase64(opts.html)));
+    lines.push("");
+  }
 
   // alt: text/calendar with method — what makes Outlook show "Accept"
   lines.push(`--${boundaryAlt}`);
