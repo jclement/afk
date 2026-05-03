@@ -25,7 +25,12 @@ import {
   vacationsInYear,
 } from "../../shared/vacation-math.js";
 import { sendVacationLifecycleEmail } from "../lib/vacation-emails.js";
-import { createOrResetApproval, getBoss, setVacationApprovalState } from "../lib/boss-store.js";
+import {
+  clearPendingDecisionTokens,
+  createOrResetApproval,
+  getBoss,
+  setVacationApprovalState,
+} from "../lib/boss-store.js";
 import { sendBossApprovalRequest, sendBossNotifyInvite } from "../lib/boss-emails.js";
 import type { Allowance, BossRelationship, Category } from "../../shared/types.js";
 
@@ -219,22 +224,59 @@ r.patch("/:id", async (c) => {
         : {}),
     });
     if (updated) {
-      // If the vacation was previously approved/rejected and the dates or
-      // category were edited, treat it as a new request and re-trigger the
-      // boss approval flow. Notify-mode bosses just see the new iCal.
       const boss = await getBoss(c.env.DB, user.id);
       let toMail = updated;
-      if (
-        boss?.consent_status === "consented" &&
-        boss.mode === "approval" &&
-        updated.approval_state !== "pending"
-      ) {
-        await setVacationApprovalState(c.env.DB, user.id, updated.id, "pending");
-        const fresh = await getVacation(c.env.DB, user.id, updated.id);
-        if (fresh) toMail = fresh;
+      let priorApprovedVacation: typeof updated | null = null;
+      if (boss?.consent_status === "consented" && boss.mode === "approval") {
+        // Capture the prior state BEFORE we mutate so we can send a "this
+        // event is being re-evaluated" CANCEL/TENTATIVE to the boss when
+        // the user edits a previously-approved booking. Otherwise the
+        // boss's calendar keeps the stale CONFIRMED event for the OLD
+        // dates until the new request is approved.
+        if (existing.approval_state === "approved") {
+          priorApprovedVacation = existing;
+        }
+        // Edit of a rejected vacation revives it as pending. The reject
+        // path set cancelled_at; clear it so the row is coherent (state
+        // and cancelled_at agree). uncancelVacation handles the SQL +
+        // sequence bump.
+        if (updated.cancelled_at && updated.approval_state === "rejected") {
+          const uncan = await uncancelVacation(c.env.DB, user.id, updated.id);
+          if (uncan) toMail = uncan.vacation;
+        }
+        // Re-arm approval. createOrResetApproval (called via mailVacation)
+        // will mint a fresh decision token + invalidate any old one.
+        if (toMail.approval_state !== "pending") {
+          await setVacationApprovalState(c.env.DB, user.id, toMail.id, "pending");
+          const fresh = await getVacation(c.env.DB, user.id, toMail.id);
+          if (fresh) toMail = fresh;
+        }
       }
       c.executionCtx.waitUntil(
-        mailVacation(c.env, new URL(c.req.url).origin, user, toMail, "updated", boss),
+        (async () => {
+          // Send the boss a TENTATIVE update for the OLD dates first if we
+          // bumped an approved booking back to pending — same UID + bumped
+          // sequence overwrites the prior CONFIRMED event in their calendar.
+          if (priorApprovedVacation && boss) {
+            try {
+              const allCats = await listCategories(c.env.DB, user.id);
+              const cat = allCats.find((cc) => cc.id === priorApprovedVacation.category_id) ?? null;
+              await sendBossNotifyInvite({
+                env: c.env,
+                appOrigin: new URL(c.req.url).origin,
+                user,
+                boss,
+                vacation: { ...priorApprovedVacation, ical_sequence: toMail.ical_sequence },
+                category: cat,
+                method: "PUBLISH",
+                status: "TENTATIVE",
+              });
+            } catch (e) {
+              console.error("[boss] tentative-update failed", e);
+            }
+          }
+          await mailVacation(c.env, new URL(c.req.url).origin, user, toMail, "updated", boss);
+        })(),
       );
     }
     return ok(c, updated);
@@ -246,8 +288,22 @@ r.patch("/:id", async (c) => {
 r.post("/:id/cancel", async (c) => {
   const user = authedUser(c);
   const id = c.req.param("id");
+  // Capture state before we mutate so we know whether to fire emails / kill
+  // pending boss tokens.
+  const before = await getVacation(c.env.DB, user.id, id);
   const result = await cancelVacation(c.env.DB, user.id, id);
   if (!result) return err(c, "NOT_FOUND", "Vacation not found.");
+
+  // Boss-side defence: a pending approval request the boss hasn't decided
+  // yet must be invalidated when the user self-cancels. Otherwise the boss
+  // could click "approve" on a vacation the user already withdrew, which
+  // boss-public's "approved + cancelled_at = uncancel" branch would
+  // silently undo. Null the decision token so the boss's link 404s.
+  if (before?.approval_state === "pending") {
+    await clearPendingDecisionTokens(c.env.DB, id);
+    await setVacationApprovalState(c.env.DB, user.id, id, null);
+  }
+
   // Only fire the CANCEL email when state actually changed — a double-click
   // shouldn't spam the user's calendar with duplicate cancellations.
   if (result.changed) {
@@ -262,12 +318,26 @@ r.post("/:id/cancel", async (c) => {
 r.post("/:id/uncancel", async (c) => {
   const user = authedUser(c);
   const id = c.req.param("id");
+  const before = await getVacation(c.env.DB, user.id, id);
   const result = await uncancelVacation(c.env.DB, user.id, id);
   if (!result) return err(c, "NOT_FOUND", "Vacation not found.");
   if (result.changed) {
     const boss = await getBoss(c.env.DB, user.id);
+    let toMail = result.vacation;
+    // Uncancelling a rejected vacation revives it. The user's intent is
+    // "this should be live" — but if the boss is in approval mode, it has
+    // to be re-evaluated. Drop it back to pending and re-arm. If we left
+    // approval_state='rejected' the iCal feed would render the just-
+    // uncancelled vacation as CANCELLED again — silent disappearance.
+    if (before?.approval_state === "rejected") {
+      const newState =
+        boss?.consent_status === "consented" && boss.mode === "approval" ? "pending" : null;
+      await setVacationApprovalState(c.env.DB, user.id, id, newState);
+      const fresh = await getVacation(c.env.DB, user.id, id);
+      if (fresh) toMail = fresh;
+    }
     c.executionCtx.waitUntil(
-      mailVacation(c.env, new URL(c.req.url).origin, user, result.vacation, "uncancelled", boss),
+      mailVacation(c.env, new URL(c.req.url).origin, user, toMail, "uncancelled", boss),
     );
   }
   return ok(c, result.vacation);

@@ -111,15 +111,15 @@ export function renderApprovalPage(opts: {
     <p class="quiet">Approving as <strong>${escapeHtml(boss.boss_display_name)}</strong> — ${escapeHtml(boss.boss_email)}</p>
 
     <table class="meta">
-      <tr><th>When</th><td>${escapeHtml(range)}</td></tr>
-      <tr><th>Category</th><td>${category ? `<span class="pill" style="background:${escapeHtml(category.color)}">${escapeHtml(category.name)}</span>` : "—"}</td></tr>
-      <tr><th>Days</th><td>${escapeHtml(String(days))}</td></tr>
-      ${vacation.public_desc.trim() ? `<tr><th>Description</th><td>${escapeHtml(vacation.public_desc.trim())}</td></tr>` : ""}
+      <tr><th scope="row">When</th><td>${escapeHtml(range)}</td></tr>
+      <tr><th scope="row">Category</th><td>${category ? `<span class="pill" style="background:${escapeHtml(category.color)}">${escapeHtml(category.name)}</span>` : "—"}</td></tr>
+      <tr><th scope="row">Days</th><td>${escapeHtml(String(days))}</td></tr>
+      ${vacation.public_desc.trim() ? `<tr><th scope="row">Description</th><td>${escapeHtml(vacation.public_desc.trim())}</td></tr>` : ""}
     </table>
 
     <h2>Their ${escapeHtml(category?.name ?? "category")} balance after this request</h2>
     <table class="balance">
-      <thead><tr><th>Used</th><th>Total</th><th>Remaining</th></tr></thead>
+      <thead><tr><th scope="col">Used</th><th scope="col">Total</th><th scope="col">Remaining</th></tr></thead>
       <tbody><tr>
         <td>${fmtDays(balance.used_days)}</td>
         <td>${fmtDays(balance.total_days)}</td>
@@ -139,28 +139,13 @@ export function renderApprovalPage(opts: {
       </div>
     </form>
 
-    <script>
-      // Require a comment when rejecting. Approve-without-comment is fine.
-      document.getElementById('decide-form').addEventListener('submit', function (e) {
-        var btn = e.submitter;
-        var ta = document.getElementById('comment');
-        if (btn && btn.value === 'reject' && !ta.value.trim()) {
-          e.preventDefault();
-          ta.focus();
-          ta.setCustomValidity('Please add a short reason when rejecting.');
-          ta.reportValidity();
-        }
-      });
-    </script>
+    <script src="/boss-approve.js"></script>
   `;
 
   return shell({
     title: `${user.display_name}'s vacation request — AFK`,
     body,
     appOrigin,
-    // Permit one inline event handler hash + script. Could also nonce; for
-    // a single-page no-build flow this is the simplest path.
-    extraCsp: "'unsafe-inline'",
   });
 }
 
@@ -211,11 +196,18 @@ interface ShellOpts {
   title: string;
   body: string;
   appOrigin: string;
-  /** Optional CSP-tighten override — for the approval page's tiny inline script. */
-  extraCsp?: string;
 }
 
-function shell({ title, body, appOrigin, extraCsp }: ShellOpts): string {
+/** Cache-Control headers all boss pages should send. PII + per-token; never
+ * cache. Use this when constructing the Response in the route handler. */
+export const BOSS_PAGE_HEADERS: HeadersInit = {
+  "Content-Type": "text/html; charset=utf-8",
+  "Cache-Control": "private, no-store, no-cache, must-revalidate",
+  // Belt-and-suspenders alongside the meta tag.
+  "Referrer-Policy": "no-referrer",
+};
+
+function shell({ title, body, appOrigin }: ShellOpts): string {
   // Self-contained CSS — no external assets so the page renders fast and
   // works even if the boss is on a corporate VPN that blocks third-party
   // CDNs. Light theme only — emails-and-corporate-portal vibe.
@@ -224,8 +216,7 @@ function shell({ title, body, appOrigin, extraCsp }: ShellOpts): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light">
-  <meta name="referrer" content="strict-origin-when-cross-origin">
-  ${extraCsp ? `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' ${extraCsp}; style-src 'self' 'unsafe-inline'">` : ""}
+  <meta name="referrer" content="no-referrer">
   <title>${escapeHtml(title)}</title>
   <style>
     :root { color-scheme: light; }
@@ -245,7 +236,7 @@ function shell({ title, body, appOrigin, extraCsp }: ShellOpts): string {
     .callout-label { font-size: 12px; font-weight: 600; color: #1d4ed8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     .callout p { margin: 0; color: #1e3a8a; font-size: 14px; }
     table.meta { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
-    table.meta th { text-align: left; color: #6b7280; font-weight: 500; padding: 6px 12px 6px 0; vertical-align: top; width: 110px; }
+    table.meta th { text-align: left; color: #6b7280; font-weight: 500; padding: 6px 12px 6px 0; vertical-align: top; width: 110px; font-weight: 500; }
     table.meta td { padding: 6px 0; color: #111827; }
     table.balance { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px; }
     table.balance th { text-align: left; padding: 6px 12px 6px 0; color: #6b7280; font-weight: 500; }
@@ -256,8 +247,10 @@ function shell({ title, body, appOrigin, extraCsp }: ShellOpts): string {
     textarea:focus { outline: 2px solid #2563eb; outline-offset: 1px; border-color: #2563eb; }
     .actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
     button { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; min-height: 44px; min-width: 120px; }
-    button.primary { background: #16a34a; color: white; }
-    button.primary:hover { background: #15803d; }
+    /* Use the darker green so white-on-green clears WCAG AA (4.5:1). The
+       lighter #16a34a was failing at 2.81:1. */
+    button.primary { background: #15803d; color: white; }
+    button.primary:hover { background: #166534; }
     button.danger { background: white; color: #b91c1c; border-color: #fecaca; }
     button.danger:hover { background: #fee2e2; }
     button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }

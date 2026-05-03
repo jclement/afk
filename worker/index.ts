@@ -35,7 +35,21 @@ import bossPublicRoutes from "./routes/boss-public.js";
 
 const app = new Hono<HonoVars>();
 
-app.use("*", logger());
+// Request logger — but redact paths that carry secrets in the URL. The
+// hono `logger()` middleware emits the raw path, which would leak boss
+// consent/decision tokens and email-verification tokens into wrangler tail
+// (and from there to anyone with logs access). We swap the path with a
+// redacted form for the duration of the log call only.
+app.use(
+  "*",
+  logger((message: string, ...rest: unknown[]) => {
+    const redacted = message
+      .replace(/\/boss\/(consent|approve)\/[0-9a-f]+/g, "/boss/$1/<redacted>")
+      .replace(/\/verify-email\/[0-9a-f]+/g, "/verify-email/<redacted>")
+      .replace(/\/ical\/[0-9a-f]+/g, "/ical/<redacted>");
+    console.log(redacted, ...rest);
+  }),
+);
 app.use(
   "*",
   secureHeaders({

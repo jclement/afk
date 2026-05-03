@@ -74,6 +74,16 @@ r.put("/", async (c) => {
       "Verify your own email before adding a boss — they'll be replying to you, not us.",
     );
   }
+  if (email === user.email.toLowerCase()) {
+    // Self-as-boss would let the user approve their own time off (in approval
+    // mode) and creates from/to-the-same-address loops in notify mode. Block
+    // it cleanly rather than try to handle a degenerate case.
+    return err(
+      c,
+      "VALIDATION_ERROR",
+      "That's your own email — pick someone else as your approver.",
+    );
+  }
   const result = await upsertBoss(c.env.DB, user.id, {
     boss_email: email,
     boss_display_name: displayName,

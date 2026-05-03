@@ -30,7 +30,7 @@ import {
   cancelVacation,
 } from "../lib/store.js";
 import { getUser } from "../lib/users.js";
-import { renderApprovalPage, renderConsentPage } from "../lib/boss-pages.js";
+import { BOSS_PAGE_HEADERS, renderApprovalPage, renderConsentPage } from "../lib/boss-pages.js";
 import { sendBossNotifyInvite, sendDecisionReceiptToUser } from "../lib/boss-emails.js";
 import { sendVacationLifecycleEmail } from "../lib/vacation-emails.js";
 import {
@@ -42,6 +42,13 @@ import {
 const r = new Hono<HonoVars>();
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
+
+/** Wrap a rendered HTML body in a Response with the boss-page headers
+ * (no-store + Referrer-Policy: no-referrer). All boss-public handlers
+ * use this so we can't accidentally drop the cache headers. */
+function bossHtml(html: string, status: number = 200): Response {
+  return new Response(html, { headers: BOSS_PAGE_HEADERS, status });
+}
 
 // ---------------------------------------------------------------------------
 // Consent flow
@@ -55,7 +62,7 @@ r.get("/consent/:token", async (c) => {
   if (!boss) return notFoundConsent(c, origin);
   const user = await getUser(c.env.DB, boss.user_id);
   if (!user) return notFoundConsent(c, origin);
-  return c.html(
+  return bossHtml(
     renderConsentPage({
       user,
       boss,
@@ -73,7 +80,7 @@ r.post("/consent/:token", async (c) => {
   if (!boss) return notFoundConsent(c, origin);
   const user = await getUser(c.env.DB, boss.user_id);
   if (!user) return notFoundConsent(c, origin);
-  return c.html(
+  return bossHtml(
     renderConsentPage({
       user,
       boss,
@@ -94,7 +101,7 @@ r.get("/approve/:token", async (c) => {
   if (!TOKEN_RE.test(token)) return notFoundApprove(c, origin);
   const ctx = await loadApprovalContext(c.env.DB, token);
   if (!ctx) return notFoundApprove(c, origin);
-  return c.html(
+  return bossHtml(
     renderApprovalPage({
       ...ctx,
       appOrigin: origin,
@@ -123,7 +130,7 @@ r.post("/approve/:token", async (c) => {
     .trim();
 
   if (action !== "approve" && action !== "reject") {
-    return c.html(
+    return bossHtml(
       renderApprovalPage({
         ...ctx,
         appOrigin: origin,
@@ -134,7 +141,7 @@ r.post("/approve/:token", async (c) => {
   }
   if (action === "reject" && !comment) {
     // Re-render the form with the error banner + the (empty) comment.
-    return c.html(
+    return bossHtml(
       renderApprovalPage({
         ...ctx,
         appOrigin: origin,
@@ -145,9 +152,22 @@ r.post("/approve/:token", async (c) => {
     );
   }
 
-  // Persist the decision and burn the token in one shot.
+  // Persist the decision and burn the token in one shot. The DB-side guard
+  // makes this race-safe: a concurrent second click in another tab returns
+  // `false` (token already cleared) and we render the same confirmation
+  // page without firing duplicate emails / iCal updates.
   const decision = action === "approve" ? "approved" : "rejected";
-  await decideApproval(c.env.DB, ctx.approval.id, decision, comment || null);
+  const persisted = await decideApproval(c.env.DB, ctx.approval.id, decision, comment || null);
+  if (!persisted) {
+    return bossHtml(
+      renderApprovalPage({
+        ...ctx,
+        appOrigin: origin,
+        formAction: `/boss/approve/${token}`,
+        confirmation: decision,
+      }),
+    );
+  }
 
   // Mirror the state onto vacations.approval_state so the dashboard query
   // and the iCal feed render the right STATUS without a join.
@@ -215,7 +235,7 @@ r.post("/approve/:token", async (c) => {
     ]).then(() => undefined),
   );
 
-  return c.html(
+  return bossHtml(
     renderApprovalPage({
       ...ctx,
       appOrigin: origin,
@@ -280,8 +300,8 @@ async function loadApprovalContext(
   };
 }
 
-function notFoundConsent(c: import("hono").Context<HonoVars>, appOrigin: string) {
-  return c.html(
+function notFoundConsent(_c: import("hono").Context<HonoVars>, appOrigin: string) {
+  return bossHtml(
     renderConsentPage({
       user: emptyUser(),
       boss: emptyBoss(),
@@ -293,8 +313,8 @@ function notFoundConsent(c: import("hono").Context<HonoVars>, appOrigin: string)
   );
 }
 
-function notFoundApprove(c: import("hono").Context<HonoVars>, appOrigin: string) {
-  return c.html(
+function notFoundApprove(_c: import("hono").Context<HonoVars>, appOrigin: string) {
+  return bossHtml(
     renderApprovalPage({
       user: emptyUser(),
       boss: emptyBoss(),

@@ -38,6 +38,7 @@ export default [
         AbortSignal: "readonly",
         AbortController: "readonly",
         RequestInfo: "readonly",
+        HeadersInit: "readonly",
         queueMicrotask: "readonly",
         HTMLElement: "readonly",
         HTMLDivElement: "readonly",

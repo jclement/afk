@@ -373,6 +373,234 @@ describe("boss approval flow", () => {
   });
 });
 
+describe("boss security regressions", () => {
+  it("blocks adding self as boss (would self-approval-loop)", async () => {
+    const { cookie } = await setupUserWithEmail();
+    const res = await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: {
+        boss_email: "alice@example.com", // matches the user's own email
+        boss_display_name: "Self",
+        mode: "approval",
+      },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/own email/i);
+  });
+
+  it("does NOT include internal_desc in iCal sent to boss", async () => {
+    const { cookie, userId } = await setupUserWithEmail();
+    const categoryId = await setupCategoryAndAllowance(cookie);
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "notify" },
+    });
+    const ct = await fetchTokenFromDb(userId);
+    await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
+    sent.length = 0;
+
+    await authedFetch(cookie, "/api/v1/vacations", {
+      method: "POST",
+      json: {
+        category_id: categoryId,
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: null,
+        public_desc: "OOO",
+        internal_desc: "SECRET BIRTHDAY PARTY",
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const bossInvite = sent.find((m) => m.to === "g@e.com");
+    expect(bossInvite).toBeDefined();
+    // Notify-mode iCal MIME body must not contain the internal note.
+    expect(bossInvite!.text).not.toContain("SECRET BIRTHDAY PARTY");
+  });
+
+  it("clears in-flight decision tokens when boss email changes", async () => {
+    const { cookie, userId } = await setupUserWithEmail();
+    const categoryId = await setupCategoryAndAllowance(cookie);
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+    });
+    const ct = await fetchTokenFromDb(userId);
+    await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
+
+    const v = await authedFetch(cookie, "/api/v1/vacations", {
+      method: "POST",
+      json: {
+        category_id: categoryId,
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: null,
+        public_desc: "x",
+        internal_desc: "",
+      },
+    });
+    const vId = ((await v.json()) as { data: { id: string } }).data.id;
+    // Wait for the waitUntil-fired approval-request to mint the decision token.
+    await new Promise((r) => setTimeout(r, 20));
+    const oldDt = await env.DB.prepare(
+      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
+    )
+      .bind(vId)
+      .first<{ decision_token: string }>();
+    expect(oldDt!.decision_token).toBeTruthy();
+
+    // User changes boss email — old approval token must die so the old
+    // boss can't approve and ship the result to the new boss's address.
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "newboss@e.com", boss_display_name: "Greg", mode: "approval" },
+    });
+    const afterDt = await env.DB.prepare(
+      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
+    )
+      .bind(vId)
+      .first<{ decision_token: string | null }>();
+    expect(afterDt!.decision_token).toBeNull();
+
+    // And the old boss's link 404s.
+    expect(
+      (
+        await unauthedFetch(`/boss/approve/${oldDt!.decision_token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "action=approve",
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("delete-boss nulls pending approval_state on user's vacations", async () => {
+    const { cookie, userId } = await setupUserWithEmail();
+    const categoryId = await setupCategoryAndAllowance(cookie);
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+    });
+    const ct = await fetchTokenFromDb(userId);
+    await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
+    const v = await authedFetch(cookie, "/api/v1/vacations", {
+      method: "POST",
+      json: {
+        category_id: categoryId,
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: null,
+        public_desc: "x",
+        internal_desc: "",
+      },
+    });
+    const vId = ((await v.json()) as { data: { id: string } }).data.id;
+
+    await authedFetch(cookie, "/api/v1/boss", { method: "DELETE" });
+
+    const after = await authedFetch(cookie, `/api/v1/vacations/${vId}`);
+    const body = (await after.json()) as { data: { approval_state: string | null } };
+    expect(body.data.approval_state).toBeNull();
+  });
+
+  it("user-side cancel of pending vacation kills boss decision token", async () => {
+    const { cookie, userId } = await setupUserWithEmail();
+    const categoryId = await setupCategoryAndAllowance(cookie);
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+    });
+    const ct = await fetchTokenFromDb(userId);
+    await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
+    const v = await authedFetch(cookie, "/api/v1/vacations", {
+      method: "POST",
+      json: {
+        category_id: categoryId,
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: null,
+        public_desc: "x",
+        internal_desc: "",
+      },
+    });
+    const vId = ((await v.json()) as { data: { id: string } }).data.id;
+    await new Promise((r) => setTimeout(r, 20));
+    const dt = await env.DB.prepare(
+      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
+    )
+      .bind(vId)
+      .first<{ decision_token: string }>();
+    const tok = dt!.decision_token;
+
+    // User self-cancels.
+    await authedFetch(cookie, `/api/v1/vacations/${vId}/cancel`, { method: "POST" });
+
+    // Boss tries to approve via stale link → 404.
+    expect(
+      (
+        await unauthedFetch(`/boss/approve/${tok}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "action=approve",
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("two concurrent approve POSTs do not double-fire emails", async () => {
+    const { cookie, userId } = await setupUserWithEmail();
+    const categoryId = await setupCategoryAndAllowance(cookie);
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+    });
+    const ct = await fetchTokenFromDb(userId);
+    await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
+    const v = await authedFetch(cookie, "/api/v1/vacations", {
+      method: "POST",
+      json: {
+        category_id: categoryId,
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: null,
+        public_desc: "x",
+        internal_desc: "",
+      },
+    });
+    const vId = ((await v.json()) as { data: { id: string } }).data.id;
+    await new Promise((r) => setTimeout(r, 20));
+    const tok = (await env.DB.prepare(
+      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
+    )
+      .bind(vId)
+      .first<{ decision_token: string }>())!.decision_token;
+    sent.length = 0;
+
+    // Sequential is enough — the second hit must find the token gone.
+    await unauthedFetch(`/boss/approve/${tok}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "action=approve",
+    });
+    await unauthedFetch(`/boss/approve/${tok}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "action=approve",
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Each (user, boss) target should have received the decision-receipt /
+    // iCal exactly once.
+    const userEmails = sent.filter((m) => m.to === "alice@example.com");
+    const bossEmails = sent.filter((m) => m.to === "g@e.com");
+    // Receipt + iCal update for the user (≤2 each); only one boss invite.
+    expect(bossEmails.length).toBeLessThanOrEqual(1);
+    // The decision-receipt should NOT have been sent twice.
+    const receipts = userEmails.filter((m) => m.subject.startsWith("Approved:"));
+    expect(receipts.length).toBe(1);
+  });
+});
+
 describe("boss data export", () => {
   it("includes the boss relationship in the JSON dump (no tokens)", async () => {
     const { cookie } = await setupUserWithEmail();

@@ -29,6 +29,9 @@ export async function sendCalendarInvite(
     html?: string;
     ics: string;
     method: "PUBLISH" | "CANCEL";
+    /** Optional Reply-To header. The boss flow sets this to the user's
+     *  email so a reply lands on the human, not the no-reply box. */
+    replyTo?: string;
   },
 ): Promise<SendResult> {
   if (!env.MAILGUN_API_KEY) {
@@ -51,6 +54,7 @@ export async function sendCalendarInvite(
     html: opts.html,
     ics: opts.ics,
     method: opts.method,
+    replyTo: opts.replyTo,
   });
 
   const form = new FormData();
@@ -81,7 +85,14 @@ export async function sendCalendarInvite(
  */
 export async function sendPlainEmail(
   env: Env,
-  opts: { to: string; subject: string; text: string },
+  opts: {
+    to: string;
+    subject: string;
+    text: string;
+    /** Optional Reply-To header. Used by the boss flow so a boss replying
+     *  to a notification reaches the user, not the no-reply Mailgun box. */
+    replyTo?: string;
+  },
 ): Promise<SendResult> {
   if (!env.MAILGUN_API_KEY) {
     console.warn(`[mailgun] skipping send (no MAILGUN_API_KEY) → ${opts.to}: ${opts.subject}`);
@@ -96,8 +107,13 @@ export async function sendPlainEmail(
   const form = new FormData();
   form.append("from", from);
   form.append("to", opts.to);
-  form.append("subject", opts.subject);
+  // Sanitize subject — display_name etc. can flow in, and Mailgun may pass
+  // CR/LF straight through to the outbound RFC822 message.
+  form.append("subject", headerValue(opts.subject));
   form.append("text", opts.text);
+  if (opts.replyTo) {
+    form.append("h:Reply-To", headerValue(opts.replyTo));
+  }
 
   const auth = btoa(`api:${env.MAILGUN_API_KEY}`);
   const res = await fetch(`${apiBase}/v3/${domain}/messages`, {
@@ -122,6 +138,7 @@ function buildMime(opts: {
   html?: string;
   ics: string;
   method: "PUBLISH" | "CANCEL";
+  replyTo?: string;
 }): string {
   // RFC822 wants CRLF, base64 chunked at 76 chars. We hand-roll it because
   // the Worker runtime has no MIME library and the format is short.
@@ -137,6 +154,7 @@ function buildMime(opts: {
   const lines: string[] = [];
   lines.push(`From: ${headerValue(opts.from)}`);
   lines.push(`To: ${headerValue(opts.to)}`);
+  if (opts.replyTo) lines.push(`Reply-To: ${headerValue(opts.replyTo)}`);
   lines.push(`Subject: ${headerValue(opts.subject)}`);
   lines.push(`Date: ${headerValue(date)}`);
   lines.push(`Message-ID: ${headerValue(messageId)}`);

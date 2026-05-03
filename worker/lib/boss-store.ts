@@ -125,6 +125,35 @@ export async function upsertBoss(
   const expires = new Date(Date.now() + CONSENT_TTL_MS).toISOString();
 
   if (existing) {
+    // Reset any in-flight approval state when the relationship is
+    // re-pointed. Two triggers:
+    //  - email change: old boss must not be able to use a decision token
+    //    that would now ship results to the new boss (auth hijack)
+    //  - mode change off "approval": pending vacations are zombies in
+    //    notify mode (no boss to ever decide them)
+    const emailChanged = existing.boss_email !== input.boss_email;
+    const leavingApprovalMode = existing.mode === "approval" && input.mode !== "approval";
+    if (emailChanged || leavingApprovalMode) {
+      await db.batch([
+        db
+          .prepare(
+            `UPDATE vacation_approvals
+                SET decision_token = NULL,
+                    decision_token_expires_at = NULL
+              WHERE boss_relationship_id = ?`,
+          )
+          .bind(existing.id),
+        db
+          .prepare(
+            `UPDATE vacations
+                SET approval_state = NULL,
+                    ical_sequence = ical_sequence + 1,
+                    updated_at = datetime('now')
+              WHERE user_id = ? AND approval_state = 'pending'`,
+          )
+          .bind(userId),
+      ]);
+    }
     await db
       .prepare(
         `UPDATE boss_relationships
@@ -239,9 +268,26 @@ export async function revokeBoss(db: D1Database, relationshipId: string): Promis
     .run();
 }
 
-/** Hard-delete the relationship. User-initiated — cleans up approvals via FK. */
+/**
+ * Hard-delete the relationship + null `approval_state` on any vacation that
+ * was pending the (now-deleted) boss's decision. CASCADE cleans up the
+ * `vacation_approvals` rows but the denormalised `vacations.approval_state`
+ * doesn't have a FK — without this UPDATE those rows would be zombies
+ * (TENTATIVE on the user's calendar forever, no boss to resolve them).
+ */
 export async function deleteBoss(db: D1Database, userId: string): Promise<void> {
-  await db.prepare(`DELETE FROM boss_relationships WHERE user_id = ?`).bind(userId).run();
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE vacations
+            SET approval_state = NULL,
+                ical_sequence = ical_sequence + 1,
+                updated_at = datetime('now')
+          WHERE user_id = ? AND approval_state = 'pending'`,
+      )
+      .bind(userId),
+    db.prepare(`DELETE FROM boss_relationships WHERE user_id = ?`).bind(userId),
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,13 +455,20 @@ export async function findApprovalByToken(
  * Record the boss's decision and clear the token so it can't be replayed.
  * `comment` is required on reject (enforced by the caller).
  */
+/**
+ * Record the boss's decision and clear the token. Returns true if the row
+ * was actually updated — the `WHERE … AND decision_token IS NOT NULL` guard
+ * makes this a one-shot: a second concurrent click in another tab finds
+ * the token already cleared and `meta.changes === 0`, so the caller can
+ * skip the duplicate fan-out (no double emails, no second sequence bump).
+ */
 export async function decideApproval(
   db: D1Database,
   approvalId: string,
   decision: "approved" | "rejected",
   comment: string | null,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const res = await db
     .prepare(
       `UPDATE vacation_approvals
           SET state = ?,
@@ -423,10 +476,11 @@ export async function decideApproval(
               decision_comment = ?,
               decision_token = NULL,
               decision_token_expires_at = NULL
-        WHERE id = ?`,
+        WHERE id = ? AND decision_token IS NOT NULL`,
     )
     .bind(decision, comment, approvalId)
     .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
 /**
@@ -450,6 +504,27 @@ export async function purgeExpiredBossTokens(db: D1Database): Promise<void> {
         WHERE decision_token IS NOT NULL
           AND julianday(decision_token_expires_at) < julianday('now')`,
     )
+    .run();
+}
+
+/**
+ * Null any in-flight decision token tied to a vacation. Called from the
+ * user-side cancel handler so a boss who's still holding an unread
+ * approval-request email can't approve a vacation the user just cancelled
+ * (which would silently un-cancel it via boss-public.ts).
+ */
+export async function clearPendingDecisionTokens(
+  db: D1Database,
+  vacationId: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE vacation_approvals
+          SET decision_token = NULL,
+              decision_token_expires_at = NULL
+        WHERE vacation_id = ? AND state = 'pending'`,
+    )
+    .bind(vacationId)
     .run();
 }
 

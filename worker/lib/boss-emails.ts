@@ -68,6 +68,7 @@ export async function sendBossConsentEmail(opts: {
     to: boss.boss_email,
     subject: `${user.display_name} wants to share vacation with you on AFK`,
     text,
+    replyTo: user.email ?? undefined,
   });
 }
 
@@ -84,8 +85,11 @@ export async function sendBossNotifyInvite(opts: {
   vacation: Vacation;
   category: Category | null;
   method: "PUBLISH" | "CANCEL";
+  /** Override status. Defaults to CONFIRMED on PUBLISH (boss only sees
+   * approved bookings in approval mode; notify mode never has pending). */
+  status?: "CONFIRMED" | "TENTATIVE" | "CANCELLED";
 }): Promise<void> {
-  const { env, appOrigin, user, boss, vacation, category, method } = opts;
+  const { env, appOrigin, user, boss, vacation, category, method, status } = opts;
   const organizerEmail = env.MAILGUN_FROM
     ? extractAddress(env.MAILGUN_FROM)
     : env.MAILGUN_DOMAIN
@@ -100,10 +104,15 @@ export async function sendBossNotifyInvite(opts: {
     method,
     sequence: vacation.ical_sequence,
     appOrigin,
+    // The boss never sees the user's internal_desc — that's user-private
+    // notes ("kid's birthday party", etc.). Only public_desc + dates.
+    includeInternalDesc: false,
+    status,
+    summaryPrefix: status === "TENTATIVE" ? "Pending" : undefined,
   });
 
   const summary = inviteSummary(category, vacation);
-  const verb = method === "CANCEL" ? "Cancelled" : "Vacation";
+  const verb = method === "CANCEL" ? "Cancelled" : status === "TENTATIVE" ? "Pending" : "Vacation";
   // display_name leads, NOT email — keeps the subject readable. Email is in
   // the body for context (so the boss can reply / forward).
   const subject = `${user.display_name} — ${verb}: ${summary}`;
@@ -127,6 +136,7 @@ export async function sendBossNotifyInvite(opts: {
 
   await sendCalendarInvite(env, {
     to: boss.boss_email,
+    replyTo: user.email ?? undefined,
     subject,
     text,
     ics,
@@ -182,7 +192,12 @@ export async function sendBossApprovalRequest(opts: {
   // Restore deliberate blank lines (filter dropped them above; rebuild with
   // a small marker that allows empty gaps).
   const subject = `${user.display_name} wants ${range} off`;
-  await sendPlainEmail(env, { to: boss.boss_email, subject, text });
+  await sendPlainEmail(env, {
+    to: boss.boss_email,
+    subject,
+    text,
+    replyTo: user.email ?? undefined,
+  });
 }
 
 /**
@@ -230,11 +245,12 @@ export async function sendDecisionReceiptToUser(opts: {
 }
 
 function revokeFooter(appOrigin: string, _boss: BossRelationship): string {
-  // We don't currently mint a per-email revoke token — the user manages the
-  // relationship from their own settings. Footer points the boss at a
-  // mailto so they can ask. Could be upgraded to a one-click unsubscribe
-  // later (RFC 8058 List-Unsubscribe).
-  return `— Sent by AFK · ${appOrigin}\nDon't want these? Reply to this email and ask the sender to remove you.`;
+  // Reply-To on every boss email is set to the user's verified address (see
+  // sendBossConsentEmail / sendBossNotifyInvite / sendBossApprovalRequest).
+  // So a Reply lands on a real human, not the no-reply Mailgun box, and the
+  // footer copy is now truthful. Could be upgraded to a one-click
+  // unsubscribe later (RFC 8058 List-Unsubscribe).
+  return `— Sent by AFK · ${appOrigin}\nDon't want these? Reply to this email — it goes back to the sender.`;
 }
 
 function extractAddress(from: string): string {

@@ -43,6 +43,13 @@ export interface InviteOpts {
    * the right prefix and leaves CONFIRMED/CANCELLED untouched.
    */
   summaryPrefix?: string;
+  /**
+   * When false, the user's `internal_desc` is omitted from DESCRIPTION /
+   * X-ALT-DESC. The boss should never see internal notes — by spec the
+   * "internal" name implies user-only — so any boss-bound invite passes
+   * `false`. Defaults true (user's own self-invite includes everything).
+   */
+  includeInternalDesc?: boolean;
 }
 
 /**
@@ -74,7 +81,10 @@ export function buildInviteIcs(opts: InviteOpts): string {
   const dtend = formatExclusiveEnd(vacation.end_date);
 
   const headerLines = [describeVacation(vacation), `${vacationDayCost(vacation)} day(s) booked.`];
-  const notes = vacation.internal_desc?.trim() ?? "";
+  // Redact internal_desc when this invite is bound for the boss (or any
+  // other third party). Default is "include" because the most common caller
+  // is the user's own self-invite. Boss code paths must pass false.
+  const notes = opts.includeInternalDesc === false ? "" : (vacation.internal_desc?.trim() ?? "");
   const footer = `Booked via AFK · ${opts.appOrigin}`;
 
   // Plain-text DESCRIPTION (what calendars without HTML support display).

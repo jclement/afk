@@ -88,7 +88,8 @@ function BossSection() {
   const [mode, setMode] = useState<"notify" | "approval">("notify");
   const [error, setError] = useState<string | null>(null);
 
-  // Pre-fill on edit; reset on cancel.
+  // Pre-fill on edit; clear all state on cancel so re-opening doesn't show
+  // stale typing from a previous session.
   function startEdit() {
     setEmail(boss.data?.boss_email ?? "");
     setName(boss.data?.boss_display_name ?? "");
@@ -98,6 +99,9 @@ function BossSection() {
   }
   function cancelEdit() {
     setEditing(false);
+    setEmail("");
+    setName("");
+    setMode("notify");
     setError(null);
   }
 
@@ -107,13 +111,20 @@ function BossSection() {
     upsert.mutate(
       { boss_email: email.trim().toLowerCase(), boss_display_name: name.trim(), mode },
       {
-        onSuccess: () => setEditing(false),
+        onSuccess: () => cancelEdit(),
         onError: (err) => setError((err as Error).message),
       },
     );
   }
 
   const userEmailOk = !!me.data?.email_verified_at;
+  // Detect "this is just a display-name edit" so the save button doesn't
+  // promise an outgoing consent email that won't actually fire.
+  const onlyDisplayNameChange =
+    !!boss.data &&
+    email.trim().toLowerCase() === boss.data.boss_email &&
+    mode === boss.data.mode &&
+    name.trim() !== boss.data.boss_display_name;
 
   return (
     <section className="card p-4">
@@ -135,12 +146,25 @@ function BossSection() {
         </div>
       )}
 
-      {!editing && !boss.data && (
+      {boss.isPending && (
+        <div className="text-xs text-muted animate-pulse" role="status">
+          Loading boss settings…
+        </div>
+      )}
+      {boss.isError && (
+        <div role="alert" className="text-sm text-[color:var(--color-danger)]">
+          Couldn't load boss settings: {(boss.error as Error).message}
+        </div>
+      )}
+
+      {!editing && !boss.isPending && !boss.data && (
         <button
           type="button"
-          className="btn btn-secondary"
+          className="btn btn-secondary min-h-[40px]"
           onClick={startEdit}
           disabled={!userEmailOk}
+          title={userEmailOk ? undefined : "Verify your email above first"}
+          aria-disabled={!userEmailOk}
         >
           <Plus className="w-4 h-4" aria-hidden="true" /> Add boss / approver
         </button>
@@ -150,10 +174,30 @@ function BossSection() {
         <BossSummary
           boss={boss.data}
           onEdit={startEdit}
-          onRemove={() => remove.mutate()}
-          onResend={() => resend.mutate()}
+          onRemove={() => {
+            if (
+              window.confirm(
+                "Remove this boss? Future vacations won't be sent to them. Already-sent calendar invites stay on their calendar.",
+              )
+            ) {
+              remove.mutate(undefined, {
+                onError: (e) => setError((e as Error).message),
+              });
+            }
+          }}
+          onResend={() =>
+            resend.mutate(undefined, {
+              onError: (e) => setError((e as Error).message),
+            })
+          }
           resendPending={resend.isPending}
+          removePending={remove.isPending}
         />
+      )}
+      {!editing && error && (
+        <div role="alert" className="text-sm text-[color:var(--color-danger)] mt-2">
+          {error}
+        </div>
       )}
 
       {editing && (
@@ -229,14 +273,20 @@ function BossSection() {
             </div>
           )}
           <div className="flex gap-2 mt-1">
-            <button type="submit" className="btn btn-primary" disabled={upsert.isPending}>
+            <button
+              type="submit"
+              className="btn btn-primary min-h-[40px]"
+              disabled={upsert.isPending}
+            >
               {upsert.isPending
-                ? "Sending consent…"
-                : boss.data
-                  ? "Save & re-send consent"
-                  : "Save & send consent email"}
+                ? "Saving…"
+                : onlyDisplayNameChange
+                  ? "Save"
+                  : boss.data
+                    ? "Save & re-send consent"
+                    : "Save & send consent email"}
             </button>
-            <button type="button" className="btn btn-secondary" onClick={cancelEdit}>
+            <button type="button" className="btn btn-secondary min-h-[40px]" onClick={cancelEdit}>
               Cancel
             </button>
           </div>
@@ -252,12 +302,14 @@ function BossSummary({
   onRemove,
   onResend,
   resendPending,
+  removePending,
 }: {
   boss: BossRelationship;
   onEdit: () => void;
   onRemove: () => void;
   onResend: () => void;
   resendPending: boolean;
+  removePending: boolean;
 }) {
   const status = boss.consent_status;
   const statusBg =
@@ -268,10 +320,14 @@ function BossSummary({
         : "var(--color-warning)";
   const statusLabel =
     status === "consented" ? "Consented" : status === "revoked" ? "Revoked" : "Awaiting consent";
+  // Resend works for both pending (re-send the original) and revoked
+  // (re-invite). The server's reissueConsentToken accepts both branches.
+  const showResend = status === "pending" || status === "revoked";
+  const resendLabel = status === "revoked" ? "Re-invite" : "Resend consent";
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap gap-2 items-center text-sm">
-        <span className="pill" style={{ background: statusBg }} title={`Status: ${statusLabel}`}>
+        <span className="pill" style={{ background: statusBg }}>
           {statusLabel}
         </span>
         <span className="font-medium text-heading">{boss.boss_display_name}</span>
@@ -284,34 +340,33 @@ function BossSummary({
         </strong>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn btn-secondary" onClick={onEdit}>
+        <button
+          type="button"
+          className="btn btn-secondary min-h-[40px]"
+          onClick={onEdit}
+          disabled={removePending}
+        >
           Edit
         </button>
-        {status === "pending" && (
+        {showResend && (
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-secondary min-h-[40px]"
             onClick={onResend}
-            disabled={resendPending}
+            disabled={resendPending || removePending}
           >
             <Mail className="w-4 h-4" aria-hidden="true" />
-            {resendPending ? "Sending…" : "Resend consent"}
+            {resendPending ? "Sending…" : resendLabel}
           </button>
         )}
         <button
           type="button"
-          className="btn btn-danger"
-          onClick={() => {
-            if (
-              window.confirm(
-                "Remove this boss? Future vacations won't be sent to them. Already-sent calendar invites stay on their calendar.",
-              )
-            ) {
-              onRemove();
-            }
-          }}
+          className="btn btn-danger min-h-[40px]"
+          onClick={onRemove}
+          disabled={removePending}
         >
-          <Trash2 className="w-4 h-4" aria-hidden="true" /> Remove
+          <Trash2 className="w-4 h-4" aria-hidden="true" />
+          {removePending ? "Removing…" : "Remove"}
         </button>
       </div>
     </div>
