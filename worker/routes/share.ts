@@ -61,9 +61,20 @@ const SHARE_TOKEN_RE = /^[0-9a-f]{48}$/;
 export const shareTokensApi = new Hono<HonoVars>();
 shareTokensApi.use("*", requireAuth);
 
+/**
+ * Origin to embed in `share_url`. Derived from the request URL so it works
+ * across the dev server, *.workers.dev, and the prod custom domain without
+ * needing APP_ORIGIN set as a worker var. wrangler.toml's header comment
+ * already promises "APP_ORIGIN is derived from the request URL at runtime";
+ * this is that derivation.
+ */
+function originOf(c: { req: { url: string } }): string {
+  return new URL(c.req.url).origin;
+}
+
 shareTokensApi.get("/", async (c) => {
   const user = authedUser(c);
-  return ok(c, await listShareTokens(c.env.DB, user.id, c.env.APP_ORIGIN));
+  return ok(c, await listShareTokens(c.env.DB, user.id, originOf(c)));
 });
 
 shareTokensApi.post("/", async (c) => {
@@ -87,7 +98,7 @@ shareTokensApi.post("/", async (c) => {
     }
     throw e;
   }
-  const all = await listShareTokens(c.env.DB, user.id, c.env.APP_ORIGIN);
+  const all = await listShareTokens(c.env.DB, user.id, originOf(c));
   // Find the freshly-minted row by its share_url suffix — labels can repeat
   // and the same scope can be minted multiple times.
   const created = all.find((t) => t.share_url.endsWith(`/${token}`));
