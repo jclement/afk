@@ -16,6 +16,7 @@ import {
   Globe,
   Download,
   UserCheck,
+  User as UserIcon,
 } from "lucide-react";
 import {
   useAllowances,
@@ -33,6 +34,7 @@ import {
   useRenamePasskey,
   useResendBossConsent,
   useResendEmailVerification,
+  useSetDisplayName,
   useSetEmail,
   useSetTimezone,
   useUpdateCategory,
@@ -60,6 +62,7 @@ function SettingsPage() {
   return (
     <div className="max-w-3xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col gap-6">
       <h1 className="text-base font-semibold text-heading">Settings</h1>
+      <DisplayNameSection />
       <TimezoneSection />
       <EmailSection />
       <CategoriesSection year={year} />
@@ -84,7 +87,6 @@ function BossSection() {
 
   const [editing, setEditing] = useState(false);
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
   const [mode, setMode] = useState<"notify" | "approval">("notify");
   const [error, setError] = useState<string | null>(null);
 
@@ -92,7 +94,6 @@ function BossSection() {
   // stale typing from a previous session.
   function startEdit() {
     setEmail(boss.data?.boss_email ?? "");
-    setName(boss.data?.boss_display_name ?? "");
     setMode(boss.data?.mode ?? "notify");
     setError(null);
     setEditing(true);
@@ -100,7 +101,6 @@ function BossSection() {
   function cancelEdit() {
     setEditing(false);
     setEmail("");
-    setName("");
     setMode("notify");
     setError(null);
   }
@@ -109,7 +109,7 @@ function BossSection() {
     e.preventDefault();
     setError(null);
     upsert.mutate(
-      { boss_email: email.trim().toLowerCase(), boss_display_name: name.trim(), mode },
+      { boss_email: email.trim().toLowerCase(), mode },
       {
         onSuccess: () => cancelEdit(),
         onError: (err) => setError((err as Error).message),
@@ -118,39 +118,18 @@ function BossSection() {
   }
 
   const userEmailOk = !!me.data?.email_verified_at;
-  // Detect "this is just a display-name edit" so the save button doesn't
-  // promise an outgoing consent email that won't actually fire.
-  const onlyDisplayNameChange =
-    !!boss.data &&
-    email.trim().toLowerCase() === boss.data.boss_email &&
-    mode === boss.data.mode &&
-    name.trim() !== boss.data.boss_display_name;
 
   return (
     <section className="card p-4">
       <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
         <UserCheck className="w-4 h-4" aria-hidden="true" /> Boss / approver
+        <span className="text-[10px] uppercase tracking-wide text-muted font-normal">Optional</span>
       </h2>
       <p className="text-xs text-subtle mb-3">
-        Optional. Pick a manager (or anyone) to receive your vacation calendar — and optionally to
-        approve it before it goes live. Honour-system; they don't need an AFK account, just an email
-        and a one-click consent. You can remove them any time.
+        Optionally email a manager (or anyone) for every vacation you book — or have them approve
+        each one. Honour-system; they don't need an AFK account.
       </p>
 
-      {!userEmailOk && (
-        <div
-          role="alert"
-          className="text-xs rounded border border-[color:var(--color-warning)] bg-[color:var(--color-warning)]/10 text-[color:var(--color-warning)] px-3 py-2 mb-3"
-        >
-          Verify your own email above first — your boss replies to you, not us.
-        </div>
-      )}
-
-      {boss.isPending && (
-        <div className="text-xs text-muted animate-pulse" role="status">
-          Loading boss settings…
-        </div>
-      )}
       {boss.isError && (
         <div role="alert" className="text-sm text-[color:var(--color-danger)]">
           Couldn't load boss settings: {(boss.error as Error).message}
@@ -158,16 +137,22 @@ function BossSection() {
       )}
 
       {!editing && !boss.isPending && !boss.data && (
-        <button
-          type="button"
-          className="btn btn-secondary min-h-[40px]"
-          onClick={startEdit}
-          disabled={!userEmailOk}
-          title={userEmailOk ? undefined : "Verify your email above first"}
-          aria-disabled={!userEmailOk}
-        >
-          <Plus className="w-4 h-4" aria-hidden="true" /> Add boss / approver
-        </button>
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary min-h-[40px]"
+            onClick={startEdit}
+            disabled={!userEmailOk}
+            aria-disabled={!userEmailOk}
+          >
+            <Plus className="w-4 h-4" aria-hidden="true" /> Add boss / approver
+          </button>
+          {!userEmailOk && (
+            <p className="text-[11px] text-muted mt-2">
+              You'll need to verify your own email above first.
+            </p>
+          )}
+        </>
       )}
 
       {!editing && boss.data && (
@@ -203,21 +188,6 @@ function BossSection() {
       {editing && (
         <form onSubmit={save} className="grid gap-3 max-w-lg">
           <div>
-            <label className="label" htmlFor="boss-name">
-              Their display name
-            </label>
-            <input
-              id="boss-name"
-              className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Greg from Accounting"
-              required
-              maxLength={100}
-              autoFocus
-            />
-          </div>
-          <div>
             <label className="label" htmlFor="boss-email">
               Their email
             </label>
@@ -227,9 +197,10 @@ function BossSection() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="greg@example.com"
+              placeholder="boss@example.com"
               required
               autoComplete="off"
+              autoFocus
             />
           </div>
           <fieldset className="grid gap-2">
@@ -280,11 +251,9 @@ function BossSection() {
             >
               {upsert.isPending
                 ? "Saving…"
-                : onlyDisplayNameChange
-                  ? "Save"
-                  : boss.data
-                    ? "Save & re-send consent"
-                    : "Save & send consent email"}
+                : boss.data
+                  ? "Save & re-send consent"
+                  : "Save & send consent email"}
             </button>
             <button type="button" className="btn btn-secondary min-h-[40px]" onClick={cancelEdit}>
               Cancel
@@ -330,8 +299,7 @@ function BossSummary({
         <span className="pill" style={{ background: statusBg }}>
           {statusLabel}
         </span>
-        <span className="font-medium text-heading">{boss.boss_display_name}</span>
-        <span className="text-subtle">&lt;{boss.boss_email}&gt;</span>
+        <span className="font-mono text-heading">{boss.boss_email}</span>
       </div>
       <div className="text-xs text-subtle">
         Mode:{" "}
@@ -404,6 +372,73 @@ function ExportSection() {
           Download vacations (CSV)
         </a>
       </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Display name — the user's own name, what shows up in the boss's calendar
+// event subject ("Jeff Clement — Vacation: Hawaii"), the PDF header, and
+// the iCal feed name. Set at registration; this lets the user fix typos.
+// ---------------------------------------------------------------------------
+function DisplayNameSection() {
+  const me = useMe();
+  const set = useSetDisplayName();
+  const current = me.data?.display_name ?? "";
+  const [draft, setDraft] = useState(current);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-sync when the saved value lands (after an initial load or a save).
+  if (current && draft === "" && current !== "") setDraft(current);
+
+  const dirty = draft.trim() !== current && draft.trim().length > 0;
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    set.mutate(draft.trim(), {
+      onError: (err) => setError((err as Error).message),
+    });
+  }
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <UserIcon className="w-4 h-4" aria-hidden="true" /> Your name
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        How you show up in calendar invites, the PDF header, and (if you set up a boss) your
+        manager's inbox. Your username (<code className="font-mono">@{me.data?.username}</code>) is
+        what you sign in with — separate.
+      </p>
+      <form onSubmit={save} className="flex flex-wrap gap-2 items-end">
+        <div className="flex-1 min-w-[220px]">
+          <label className="label" htmlFor="display-name-input">
+            Display name
+          </label>
+          <input
+            id="display-name-input"
+            className="input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={100}
+            placeholder="Jeff Clement"
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          className="btn btn-primary min-h-[40px]"
+          disabled={!dirty || set.isPending}
+        >
+          {set.isPending ? "Saving…" : "Save"}
+        </button>
+      </form>
+      {error && (
+        <div role="alert" className="text-sm text-[color:var(--color-danger)] mt-2">
+          {error}
+        </div>
+      )}
     </section>
   );
 }

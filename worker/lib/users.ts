@@ -97,6 +97,26 @@ function sanitiseTimezone(tz: string | undefined): string | null {
   }
 }
 
+/**
+ * Update the user's display_name. This is the name that appears in the
+ * boss's calendar event subjects ("Jeff Clement — Vacation: Hawaii"), the
+ * PDF header, and the iCal feed name. Stripped of control chars + length
+ * capped at 100 to match the registration validator.
+ */
+export async function setUserDisplayName(
+  db: D1Database,
+  userId: string,
+  raw: string,
+): Promise<User | null> {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = raw.replace(/[\x00-\x1F\x7F]+/g, " ").trim();
+  if (!cleaned || cleaned.length > 100) {
+    throw new Error("Display name is required (max 100 chars).");
+  }
+  await db.prepare(`UPDATE users SET display_name = ? WHERE id = ?`).bind(cleaned, userId).run();
+  return getUser(db, userId);
+}
+
 // ---------------------------------------------------------------------------
 // Email + verification
 // ---------------------------------------------------------------------------

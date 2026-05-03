@@ -44,7 +44,15 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
       e?.error?.message ?? `Request failed (${res.status})`,
     );
   }
-  return (parsed as ApiData<T> | null)?.data ?? (parsed as T);
+  // Unwrap the {data: ...} envelope. We can't use `?? parsed` here because
+  // that fires whenever `data` is intentionally null (e.g. GET /api/v1/boss
+  // when no boss is configured) and would return the whole envelope object
+  // instead of null — which then renders as "boss.data is truthy" in
+  // consumers, hiding the empty state.
+  if (parsed && typeof parsed === "object" && "data" in (parsed as object)) {
+    return (parsed as ApiData<T>).data;
+  }
+  return parsed as T;
 }
 
 export const API_BASE = "/api/v1";

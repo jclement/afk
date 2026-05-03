@@ -21,13 +21,6 @@ const r = new Hono<HonoVars>();
 
 r.use("*", requireAuth);
 
-// eslint-disable-next-line no-control-regex
-const STRIP_CONTROL = /[\x00-\x1F\x7F]+/g;
-
-function sanitiseDisplay(s: string): string {
-  return s.replace(STRIP_CONTROL, " ").trim();
-}
-
 function validEmail(s: string): boolean {
   // Same shape used elsewhere — letters/digits/etc. + @ + domain. Mailgun
   // is the real validator at send time.
@@ -49,17 +42,12 @@ r.put("/", async (c) => {
   const user = authedUser(c);
   const body = await readJson<{
     boss_email?: string;
-    boss_display_name?: string;
     mode?: BossMode;
   }>(c);
   const email = (body.boss_email ?? "").trim().toLowerCase();
-  const displayName = sanitiseDisplay(body.boss_display_name ?? "");
   const mode = body.mode;
   if (!validEmail(email)) {
     return err(c, "VALIDATION_ERROR", "Boss email looks invalid.");
-  }
-  if (!displayName || displayName.length > 100) {
-    return err(c, "VALIDATION_ERROR", "Boss display name is required (max 100 chars).");
   }
   if (mode !== "notify" && mode !== "approval") {
     return err(c, "VALIDATION_ERROR", "Mode must be 'notify' or 'approval'.");
@@ -86,7 +74,6 @@ r.put("/", async (c) => {
   }
   const result = await upsertBoss(c.env.DB, user.id, {
     boss_email: email,
-    boss_display_name: displayName,
     mode,
   });
 

@@ -78,8 +78,10 @@ function VacationRow({
         {describeVacation(v)}
       </td>
       <td className="px-3 py-2">
-        <CategoryPill category={v.category} />
-        <ApprovalBadge state={v.approval_state} />
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <CategoryPill category={v.category} />
+          <ApprovalBadge state={v.approval_state} />
+        </div>
       </td>
       <td className="px-3 py-2 font-mono">{cost.toString()}</td>
       <td className="px-3 py-2 text-subtle truncate max-w-[280px]">

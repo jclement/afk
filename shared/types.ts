@@ -127,7 +127,6 @@ export interface BossRelationship {
   id: string;
   user_id: string;
   boss_email: string;
-  boss_display_name: string;
   mode: BossMode;
   consent_status: BossConsentStatus;
   consented_at: string | null;

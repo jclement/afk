@@ -48,7 +48,7 @@ export async function sendBossConsentEmail(opts: {
       : "you'll be asked to approve or reject each vacation request via a one-click link. Their bookings won't go live until you decide.";
 
   const text = [
-    `Hi ${boss.boss_display_name},`,
+    `Hi,`,
     "",
     `${user.display_name} (${user.email ?? "no email on file"}) is using AFK — Away From Keyboard, a personal vacation tracker — and would like to share their schedule with you.`,
     "",
@@ -109,6 +109,9 @@ export async function sendBossNotifyInvite(opts: {
     includeInternalDesc: false,
     status,
     summaryPrefix: status === "TENTATIVE" ? "Pending" : undefined,
+    // It's the user's vacation, not the manager's — show on their calendar
+    // but don't block their availability.
+    showAsFree: true,
   });
 
   const summary = inviteSummary(category, vacation);
@@ -167,7 +170,7 @@ export async function sendBossApprovalRequest(opts: {
   const days = vacationDayCost(vacation);
 
   const text = [
-    `Hi ${boss.boss_display_name},`,
+    `Hi,`,
     "",
     `${user.display_name} (${user.email ?? "no email on file"}) is requesting time off.`,
     "",
@@ -222,7 +225,7 @@ export async function sendDecisionReceiptToUser(opts: {
   const text = [
     `Hi ${user.display_name},`,
     "",
-    `${boss.boss_display_name} (${boss.boss_email}) ${verb} your vacation request:`,
+    `${boss.boss_email} ${verb} your vacation request:`,
     "",
     `When:     ${range}`,
     `Category: ${category?.name ?? "—"}`,

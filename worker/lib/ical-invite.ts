@@ -50,6 +50,13 @@ export interface InviteOpts {
    * `false`. Defaults true (user's own self-invite includes everything).
    */
   includeInternalDesc?: boolean;
+  /**
+   * Force `TRANSP:TRANSPARENT` and FREE busy-status regardless of `status`.
+   * Used for boss-bound invites: it's the *user's* time off, not the
+   * manager's, so the event should appear on the manager's calendar but
+   * not block their availability. Defaults false (status-derived).
+   */
+  showAsFree?: boolean;
 }
 
 /**
@@ -124,13 +131,19 @@ export function buildInviteIcs(opts: InviteOpts): string {
   lines.push(`X-ALT-DESC;FMTTYPE=text/html:${escapeText(html)}`);
   // TRANSP=TRANSPARENT for tentative/cancelled so they don't block the slot
   // on the receiver's calendar; OPAQUE for confirmed bookings = "I'm out."
-  lines.push(`TRANSP:${status === "CONFIRMED" ? "OPAQUE" : "TRANSPARENT"}`);
-  lines.push(
-    `X-MICROSOFT-CDO-BUSYSTATUS:${status === "CONFIRMED" ? "OOF" : status === "TENTATIVE" ? "TENTATIVE" : "FREE"}`,
-  );
-  lines.push(
-    `X-MICROSOFT-CDO-INTENDEDSTATUS:${status === "CONFIRMED" ? "OOF" : status === "TENTATIVE" ? "TENTATIVE" : "FREE"}`,
-  );
+  // showAsFree wins outright — used for boss-bound invites where the event
+  // should be visible but not block the manager's slot.
+  const transp = opts.showAsFree || status !== "CONFIRMED" ? "TRANSPARENT" : "OPAQUE";
+  const busy = opts.showAsFree
+    ? "FREE"
+    : status === "CONFIRMED"
+      ? "OOF"
+      : status === "TENTATIVE"
+        ? "TENTATIVE"
+        : "FREE";
+  lines.push(`TRANSP:${transp}`);
+  lines.push(`X-MICROSOFT-CDO-BUSYSTATUS:${busy}`);
+  lines.push(`X-MICROSOFT-CDO-INTENDEDSTATUS:${busy}`);
   lines.push(`SEQUENCE:${sequence}`);
   lines.push(`STATUS:${status}`);
   // ORGANIZER on a PUBLISH event is informational — receiving calendars use

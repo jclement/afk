@@ -108,7 +108,7 @@ export function renderApprovalPage(opts: {
 
   const body = `
     <h1>${escapeHtml(user.display_name)} wants ${escapeHtml(range)} off</h1>
-    <p class="quiet">Approving as <strong>${escapeHtml(boss.boss_display_name)}</strong> — ${escapeHtml(boss.boss_email)}</p>
+    <p class="quiet">Approving as <strong>${escapeHtml(boss.boss_email)}</strong></p>
 
     <table class="meta">
       <tr><th scope="row">When</th><td>${escapeHtml(range)}</td></tr>

@@ -32,7 +32,6 @@ interface BossRow {
   id: string;
   user_id: string;
   boss_email: string;
-  boss_display_name: string;
   mode: BossMode;
   consent_token: string | null;
   consent_token_expires_at: string | null;
@@ -46,7 +45,6 @@ function rowToBoss(r: BossRow): BossRelationship {
     id: r.id,
     user_id: r.user_id,
     boss_email: r.boss_email,
-    boss_display_name: r.boss_display_name,
     mode: r.mode,
     consent_status: deriveConsentStatus(r),
     consented_at: r.consented_at,
@@ -64,7 +62,7 @@ function deriveConsentStatus(r: {
   return "pending";
 }
 
-const SELECT_BOSS = `SELECT id, user_id, boss_email, boss_display_name, mode,
+const SELECT_BOSS = `SELECT id, user_id, boss_email, mode,
   consent_token, consent_token_expires_at, consented_at, revoked_at, created_at
   FROM boss_relationships`;
 
@@ -101,22 +99,14 @@ async function getBossRowByUser(db: D1Database, userId: string): Promise<BossRow
 export async function upsertBoss(
   db: D1Database,
   userId: string,
-  input: { boss_email: string; boss_display_name: string; mode: BossMode },
+  input: { boss_email: string; mode: BossMode },
 ): Promise<{ boss: BossRelationship; consent_token: string | null }> {
   const existing = await getBossRowByUser(db, userId);
   const sameEmail = existing && existing.boss_email === input.boss_email;
   const sameMode = existing && existing.mode === input.mode;
 
   if (existing && sameEmail && sameMode) {
-    // Display-name only change — keep consent.
-    if (existing.boss_display_name !== input.boss_display_name) {
-      await db
-        .prepare(`UPDATE boss_relationships SET boss_display_name = ? WHERE id = ?`)
-        .bind(input.boss_display_name, existing.id)
-        .run();
-      const updated = await getBossRowByUser(db, userId);
-      return { boss: rowToBoss(updated!), consent_token: null };
-    }
+    // No-op — nothing meaningful changed.
     return { boss: rowToBoss(existing), consent_token: null };
   }
 
@@ -157,21 +147,21 @@ export async function upsertBoss(
     await db
       .prepare(
         `UPDATE boss_relationships
-            SET boss_email = ?, boss_display_name = ?, mode = ?,
+            SET boss_email = ?, mode = ?,
                 consent_token = ?, consent_token_expires_at = ?,
                 consented_at = NULL, revoked_at = NULL
           WHERE id = ?`,
       )
-      .bind(input.boss_email, input.boss_display_name, input.mode, token, expires, existing.id)
+      .bind(input.boss_email, input.mode, token, expires, existing.id)
       .run();
   } else {
     await db
       .prepare(
         `INSERT INTO boss_relationships
-           (id, user_id, boss_email, boss_display_name, mode, consent_token, consent_token_expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, user_id, boss_email, mode, consent_token, consent_token_expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .bind(newId(), userId, input.boss_email, input.boss_display_name, input.mode, token, expires)
+      .bind(newId(), userId, input.boss_email, input.mode, token, expires)
       .run();
   }
 
@@ -391,7 +381,7 @@ export async function findApprovalByToken(
               a.created_at AS a_created_at,
               v.user_id AS v_user_id,
               b.id AS b_id, b.user_id AS b_user_id, b.boss_email AS b_email,
-              b.boss_display_name AS b_display, b.mode AS b_mode,
+              b.mode AS b_mode,
               b.consented_at AS b_consented, b.revoked_at AS b_revoked,
               b.created_at AS b_created
          FROM vacation_approvals a
@@ -414,7 +404,6 @@ export async function findApprovalByToken(
       b_id: string;
       b_user_id: string;
       b_email: string;
-      b_display: string;
       b_mode: BossMode;
       b_consented: string | null;
       b_revoked: string | null;
@@ -438,7 +427,6 @@ export async function findApprovalByToken(
       id: row.b_id,
       user_id: row.b_user_id,
       boss_email: row.b_email,
-      boss_display_name: row.b_display,
       mode: row.b_mode,
       consent_status: deriveConsentStatus({
         consented_at: row.b_consented,

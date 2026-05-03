@@ -10,6 +10,7 @@ import { err, ok } from "../lib/responses.js";
 import {
   clearUserEmail,
   reissueEmailToken,
+  setUserDisplayName,
   setUserTimezone,
   startEmailChange,
 } from "../lib/users.js";
@@ -64,6 +65,20 @@ r.delete("/email", async (c) => {
   const user = authedUser(c);
   await clearUserEmail(c.env.DB, user.id);
   return ok(c, { email: null, verified: false });
+});
+
+r.patch("/display-name", async (c) => {
+  const user = authedUser(c);
+  const body = await c.req
+    .json<{ display_name?: string }>()
+    .catch(() => ({}) as { display_name?: string });
+  try {
+    const updated = await setUserDisplayName(c.env.DB, user.id, body.display_name ?? "");
+    if (!updated) return err(c, "NOT_FOUND", "User not found.");
+    return ok(c, { display_name: updated.display_name });
+  } catch (e) {
+    return err(c, "VALIDATION_ERROR", (e as Error).message);
+  }
 });
 
 r.patch("/timezone", async (c) => {

@@ -108,6 +108,18 @@ export function useClearEmail() {
   });
 }
 
+export function useSetDisplayName() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (display_name: string) =>
+      api<{ display_name: string }>(`${API_BASE}/me/display-name`, {
+        method: "PATCH",
+        json: { display_name },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+  });
+}
+
 export function useSetTimezone() {
   const qc = useQueryClient();
   return useMutation({
@@ -350,7 +362,7 @@ export function useBoss() {
 export function useUpsertBoss() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { boss_email: string; boss_display_name: string; mode: BossMode }) =>
+    mutationFn: (body: { boss_email: string; mode: BossMode }) =>
       api<BossRelationship>(`${API_BASE}/boss`, {
         method: "PUT",
         json: body,

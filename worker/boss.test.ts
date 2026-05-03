@@ -101,7 +101,7 @@ describe("boss API", () => {
     const { cookie } = await createTestSession({ username: "noemail" });
     const res = await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "boss@example.com", boss_display_name: "Boss", mode: "notify" },
+      json: { boss_email: "boss@example.com", mode: "notify" },
     });
     expect(res.status).toBe(400);
   });
@@ -112,7 +112,6 @@ describe("boss API", () => {
       method: "PUT",
       json: {
         boss_email: "greg@example.com",
-        boss_display_name: "Greg from Accounting",
         mode: "notify",
       },
     });
@@ -136,7 +135,7 @@ describe("boss API", () => {
       (
         await authedFetch(cookie, "/api/v1/boss", {
           method: "PUT",
-          json: { boss_email: "nope", boss_display_name: "x", mode: "notify" },
+          json: { boss_email: "nope", mode: "notify" },
         })
       ).status,
     ).toBe(400);
@@ -144,7 +143,7 @@ describe("boss API", () => {
       (
         await authedFetch(cookie, "/api/v1/boss", {
           method: "PUT",
-          json: { boss_email: "x@y.z", boss_display_name: "x", mode: "wat" },
+          json: { boss_email: "x@y.z", mode: "wat" },
         })
       ).status,
     ).toBe(400);
@@ -154,7 +153,7 @@ describe("boss API", () => {
     const { cookie } = await setupUserWithEmail();
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "G", mode: "notify" },
+      json: { boss_email: "g@e.com", mode: "notify" },
     });
     expect((await authedFetch(cookie, "/api/v1/boss", { method: "DELETE" })).status).toBe(200);
     const get = await authedFetch(cookie, "/api/v1/boss");
@@ -171,12 +170,30 @@ async function fetchTokenFromDb(userId: string): Promise<string> {
   return row.consent_token;
 }
 
+/**
+ * Pull the text/calendar part out of a captured Mailgun MIME body and
+ * base64-decode it. The mailgun mock stores the whole MIME blob as `text`
+ * for messages.mime sends; the ICS lives in a base64-encoded part.
+ */
+function decodeIcsFromMime(mime: string): string {
+  const idx = mime.indexOf("text/calendar");
+  if (idx < 0) return mime;
+  // Skip past the part headers — a blank line separates them from the body.
+  const bodyStart = mime.indexOf("\r\n\r\n", idx);
+  if (bodyStart < 0) return mime;
+  const after = mime.slice(bodyStart + 4);
+  // Body runs until the next MIME boundary marker (lines starting with `--`).
+  const endMatch = /\r?\n--/.exec(after);
+  const b64 = (endMatch ? after.slice(0, endMatch.index) : after).replace(/\s+/g, "");
+  return atob(b64);
+}
+
 describe("boss consent flow", () => {
   it("GET on a valid token renders the consent page", async () => {
     const { cookie, userId } = await setupUserWithEmail();
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "notify" },
+      json: { boss_email: "g@e.com", mode: "notify" },
     });
     const token = await fetchTokenFromDb(userId);
     const res = await unauthedFetch(`/boss/consent/${token}`);
@@ -190,7 +207,7 @@ describe("boss consent flow", () => {
     const { cookie, userId } = await setupUserWithEmail();
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "notify" },
+      json: { boss_email: "g@e.com", mode: "notify" },
     });
     const token = await fetchTokenFromDb(userId);
     const accept = await unauthedFetch(`/boss/consent/${token}`, { method: "POST" });
@@ -230,7 +247,7 @@ describe("boss approval flow", () => {
 
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+      json: { boss_email: "g@e.com", mode: "approval" },
     });
     const consentToken = await fetchTokenFromDb(userId);
     await unauthedFetch(`/boss/consent/${consentToken}`, { method: "POST" });
@@ -275,7 +292,7 @@ describe("boss approval flow", () => {
     const categoryId = await setupCategoryAndAllowance(cookie);
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "notify" },
+      json: { boss_email: "g@e.com", mode: "notify" },
     });
     const ct = await fetchTokenFromDb(userId);
     await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
@@ -298,6 +315,13 @@ describe("boss approval flow", () => {
     // Subject leads with display_name and does NOT inline the user's email.
     expect(bossInvite!.subject).toContain("Alice Example");
     expect(bossInvite!.subject).not.toContain("alice@example.com");
+    // Boss-bound invite must be transparent/FREE so it doesn't block the
+    // manager's calendar — it's the user's vacation, not theirs. The ICS
+    // is base64-encoded inside the MIME multipart, so decode before asserting.
+    const ics = decodeIcsFromMime(bossInvite!.text);
+    expect(ics).toContain("TRANSP:TRANSPARENT");
+    expect(ics).toContain("X-MICROSOFT-CDO-BUSYSTATUS:FREE");
+    expect(ics).not.toContain("BUSYSTATUS:OOF");
   });
 
   it("approve flips state, sends user receipt + boss invite, burns token", async () => {
@@ -380,7 +404,6 @@ describe("boss security regressions", () => {
       method: "PUT",
       json: {
         boss_email: "alice@example.com", // matches the user's own email
-        boss_display_name: "Self",
         mode: "approval",
       },
     });
@@ -394,7 +417,7 @@ describe("boss security regressions", () => {
     const categoryId = await setupCategoryAndAllowance(cookie);
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "notify" },
+      json: { boss_email: "g@e.com", mode: "notify" },
     });
     const ct = await fetchTokenFromDb(userId);
     await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
@@ -423,7 +446,7 @@ describe("boss security regressions", () => {
     const categoryId = await setupCategoryAndAllowance(cookie);
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+      json: { boss_email: "g@e.com", mode: "approval" },
     });
     const ct = await fetchTokenFromDb(userId);
     await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
@@ -453,7 +476,7 @@ describe("boss security regressions", () => {
     // boss can't approve and ship the result to the new boss's address.
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "newboss@e.com", boss_display_name: "Greg", mode: "approval" },
+      json: { boss_email: "newboss@e.com", mode: "approval" },
     });
     const afterDt = await env.DB.prepare(
       `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
@@ -479,7 +502,7 @@ describe("boss security regressions", () => {
     const categoryId = await setupCategoryAndAllowance(cookie);
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+      json: { boss_email: "g@e.com", mode: "approval" },
     });
     const ct = await fetchTokenFromDb(userId);
     await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
@@ -508,7 +531,7 @@ describe("boss security regressions", () => {
     const categoryId = await setupCategoryAndAllowance(cookie);
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+      json: { boss_email: "g@e.com", mode: "approval" },
     });
     const ct = await fetchTokenFromDb(userId);
     await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
@@ -552,7 +575,7 @@ describe("boss security regressions", () => {
     const categoryId = await setupCategoryAndAllowance(cookie);
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "approval" },
+      json: { boss_email: "g@e.com", mode: "approval" },
     });
     const ct = await fetchTokenFromDb(userId);
     await unauthedFetch(`/boss/consent/${ct}`, { method: "POST" });
@@ -606,7 +629,7 @@ describe("boss data export", () => {
     const { cookie } = await setupUserWithEmail();
     await authedFetch(cookie, "/api/v1/boss", {
       method: "PUT",
-      json: { boss_email: "g@e.com", boss_display_name: "Greg", mode: "notify" },
+      json: { boss_email: "g@e.com", mode: "notify" },
     });
     const res = await authedFetch(cookie, "/api/v1/me/export.json");
     const body = (await res.json()) as {

@@ -350,7 +350,6 @@ function emptyBoss(): import("../../shared/types.js").BossRelationship {
     id: "",
     user_id: "",
     boss_email: "",
-    boss_display_name: "",
     mode: "notify",
     consent_status: "pending",
     consented_at: null,
