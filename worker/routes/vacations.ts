@@ -25,7 +25,9 @@ import {
   vacationsInYear,
 } from "../../shared/vacation-math.js";
 import { sendVacationLifecycleEmail } from "../lib/vacation-emails.js";
-import type { Allowance, Category } from "../../shared/types.js";
+import { createOrResetApproval, getBoss, setVacationApprovalState } from "../lib/boss-store.js";
+import { sendBossApprovalRequest, sendBossNotifyInvite } from "../lib/boss-emails.js";
+import type { Allowance, BossRelationship, Category } from "../../shared/types.js";
 
 const r = new Hono<HonoVars>();
 
@@ -140,7 +142,7 @@ r.post("/", async (c) => {
   const public_desc = sanitiseText(body.public_desc ?? "", 200);
   const internal_desc = sanitiseText(body.internal_desc ?? "", 2000);
   try {
-    const created = await createVacation(c.env.DB, user.id, {
+    let created = await createVacation(c.env.DB, user.id, {
       category_id,
       start_date,
       end_date,
@@ -148,8 +150,21 @@ r.post("/", async (c) => {
       public_desc,
       internal_desc,
     });
+
+    // Boss / approval gate. If the user has a consented boss in approval
+    // mode, mark the vacation as pending up-front so the user's own iCal
+    // invite (sent below via mailVacation) goes out as TENTATIVE — not
+    // CONFIRMED, then immediately corrected.
+    const boss = await getBoss(c.env.DB, user.id);
+    const bossActive = boss && boss.consent_status === "consented";
+    if (bossActive && boss.mode === "approval") {
+      await setVacationApprovalState(c.env.DB, user.id, created.id, "pending");
+      const fresh = await getVacation(c.env.DB, user.id, created.id);
+      if (fresh) created = fresh;
+    }
+
     c.executionCtx.waitUntil(
-      mailVacation(c.env, new URL(c.req.url).origin, user, created, "created"),
+      mailVacation(c.env, new URL(c.req.url).origin, user, created, "created", boss),
     );
     return ok(c, created, 201);
   } catch (e) {
@@ -204,8 +219,22 @@ r.patch("/:id", async (c) => {
         : {}),
     });
     if (updated) {
+      // If the vacation was previously approved/rejected and the dates or
+      // category were edited, treat it as a new request and re-trigger the
+      // boss approval flow. Notify-mode bosses just see the new iCal.
+      const boss = await getBoss(c.env.DB, user.id);
+      let toMail = updated;
+      if (
+        boss?.consent_status === "consented" &&
+        boss.mode === "approval" &&
+        updated.approval_state !== "pending"
+      ) {
+        await setVacationApprovalState(c.env.DB, user.id, updated.id, "pending");
+        const fresh = await getVacation(c.env.DB, user.id, updated.id);
+        if (fresh) toMail = fresh;
+      }
       c.executionCtx.waitUntil(
-        mailVacation(c.env, new URL(c.req.url).origin, user, updated, "updated"),
+        mailVacation(c.env, new URL(c.req.url).origin, user, toMail, "updated", boss),
       );
     }
     return ok(c, updated);
@@ -222,8 +251,9 @@ r.post("/:id/cancel", async (c) => {
   // Only fire the CANCEL email when state actually changed — a double-click
   // shouldn't spam the user's calendar with duplicate cancellations.
   if (result.changed) {
+    const boss = await getBoss(c.env.DB, user.id);
     c.executionCtx.waitUntil(
-      mailVacation(c.env, new URL(c.req.url).origin, user, result.vacation, "cancelled"),
+      mailVacation(c.env, new URL(c.req.url).origin, user, result.vacation, "cancelled", boss),
     );
   }
   return ok(c, result.vacation);
@@ -235,8 +265,9 @@ r.post("/:id/uncancel", async (c) => {
   const result = await uncancelVacation(c.env.DB, user.id, id);
   if (!result) return err(c, "NOT_FOUND", "Vacation not found.");
   if (result.changed) {
+    const boss = await getBoss(c.env.DB, user.id);
     c.executionCtx.waitUntil(
-      mailVacation(c.env, new URL(c.req.url).origin, user, result.vacation, "uncancelled"),
+      mailVacation(c.env, new URL(c.req.url).origin, user, result.vacation, "uncancelled", boss),
     );
   }
   return ok(c, result.vacation);
@@ -256,6 +287,7 @@ r.delete("/:id", async (c) => {
     // (most clients want strictly greater, or they'll silently ignore the
     // cancellation). The deleteVacation path doesn't bump the row's sequence
     // because the row is gone; bump it in-memory for the outbound email.
+    const boss = await getBoss(c.env.DB, user.id);
     c.executionCtx.waitUntil(
       mailVacation(
         c.env,
@@ -263,6 +295,7 @@ r.delete("/:id", async (c) => {
         user,
         { ...existing, ical_sequence: existing.ical_sequence + 1 },
         "deleted",
+        boss,
       ),
     );
   }
@@ -271,8 +304,17 @@ r.delete("/:id", async (c) => {
 
 /**
  * Look up the vacation's category and fan out to the email helper. Pulled
- * up here so each route handler is a one-liner. Failures are swallowed by
- * the helper; this wrapper just feeds it the right data.
+ * up here so each route handler is a one-liner.
+ *
+ * Boss fan-out:
+ *   - notify mode  → boss gets a copy of every iCal invite (PUBLISH/CANCEL).
+ *   - approval mode + pending → boss gets the approval-request email with
+ *     the magic link (NOT a calendar invite — they decide first).
+ *   - approval mode + already-decided → no extra email; the approval-decide
+ *     route handles the post-decision boss copy.
+ *
+ * Failures in boss-side sends are caught individually so a Mailgun blip on
+ * the boss email doesn't take down the user's own iCal.
  */
 async function mailVacation(
   env: import("../types.js").Env,
@@ -280,11 +322,110 @@ async function mailVacation(
   user: import("../../shared/types.js").User,
   vacation: import("../../shared/types.js").Vacation,
   lifecycle: "created" | "updated" | "cancelled" | "uncancelled" | "deleted",
+  boss: BossRelationship | null,
 ): Promise<void> {
-  if (!user.email || !user.email_verified_at) return;
   const cats = await listCategories(env.DB, user.id);
   const category: Category | null = cats.find((c) => c.id === vacation.category_id) ?? null;
-  await sendVacationLifecycleEmail(env, appOrigin, user, vacation, category, lifecycle);
+
+  // 1. User-side iCal — uses TENTATIVE for pending automatically.
+  if (user.email && user.email_verified_at) {
+    try {
+      await sendVacationLifecycleEmail(env, appOrigin, user, vacation, category, lifecycle);
+    } catch (e) {
+      console.error("[vacation-emails] user-side send failed:", (e as Error).message);
+    }
+  }
+
+  if (!boss || boss.consent_status !== "consented") return;
+
+  const method: "PUBLISH" | "CANCEL" =
+    lifecycle === "cancelled" || lifecycle === "deleted" ? "CANCEL" : "PUBLISH";
+
+  // 2. Notify mode — straight iCal copy. CANCELs always go through; for
+  // PUBLISH we only send if the vacation is currently confirmed (no point
+  // mirroring a pending one to the boss in notify mode — but pending only
+  // exists in approval mode, so this is more a guardrail).
+  if (boss.mode === "notify") {
+    try {
+      await sendBossNotifyInvite({
+        env,
+        appOrigin,
+        user,
+        boss,
+        vacation,
+        category,
+        method,
+      });
+    } catch (e) {
+      console.error("[boss] notify invite failed:", (e as Error).message);
+    }
+    return;
+  }
+
+  // 3. Approval mode. Only fire the approval-request email when the
+  // vacation just entered (or re-entered) the pending state. Cancel/delete
+  // also notify the boss so any prior calendar invite they had goes away.
+  if (boss.mode === "approval") {
+    if (lifecycle === "cancelled" || lifecycle === "deleted") {
+      // Boss only ever sees the calendar event if they previously approved
+      // it. Send a CANCEL — calendar clients no-op on UIDs they've never
+      // seen, so this is safe even if they never had it.
+      try {
+        await sendBossNotifyInvite({
+          env,
+          appOrigin,
+          user,
+          boss,
+          vacation,
+          category,
+          method: "CANCEL",
+        });
+      } catch (e) {
+        console.error("[boss] approval-mode cancel failed:", (e as Error).message);
+      }
+      return;
+    }
+    if (vacation.approval_state !== "pending") return;
+
+    // Mint (or reset) an approval row + token, compute the balance preview,
+    // and send the request.
+    try {
+      const { approval, decision_token } = await createOrResetApproval(
+        env.DB,
+        vacation.id,
+        boss.id,
+      );
+      const year = Number(vacation.start_date.slice(0, 4));
+      const [allowances, vacations] = await Promise.all([
+        listAllowances(env.DB, user.id, year),
+        listVacationsInYear(env.DB, user.id, year),
+      ]);
+      const allowance = category ? allowances.find((a) => a.category_id === category.id) : null;
+      const filtered = vacationsInYear(year, vacations).filter(
+        (v) => category && v.category_id === category.id,
+      );
+      const usage = category
+        ? categoryUsage(category, allowance ?? null, filtered, new Date(), year, user.timezone)
+        : { used_days: 0, total_days: 0, remaining_days: 0 };
+      await sendBossApprovalRequest({
+        env,
+        appOrigin,
+        user,
+        boss,
+        vacation,
+        category,
+        approval,
+        decisionToken: decision_token,
+        balance: {
+          used_days: usage.used_days,
+          total_days: usage.total_days,
+          remaining_days: usage.remaining_days,
+        },
+      });
+    } catch (e) {
+      console.error("[boss] approval request failed:", (e as Error).message);
+    }
+  }
 }
 
 export default r;

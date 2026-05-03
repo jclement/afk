@@ -15,6 +15,7 @@ import {
 } from "../lib/users.js";
 import { sendPlainEmail } from "../lib/mailgun.js";
 import { listAllAllowances, listAllVacations, listCategories } from "../lib/store.js";
+import { getBoss } from "../lib/boss-store.js";
 import { buildJsonExport, buildVacationsCsv, exportFilename } from "../lib/export.js";
 
 const r = new Hono<HonoVars>();
@@ -89,16 +90,18 @@ r.patch("/timezone", async (c) => {
 // ---------------------------------------------------------------------------
 r.get("/export.json", async (c) => {
   const user = authedUser(c);
-  const [categories, allowances, vacations] = await Promise.all([
+  const [categories, allowances, vacations, boss] = await Promise.all([
     listCategories(c.env.DB, user.id),
     listAllAllowances(c.env.DB, user.id),
     listAllVacations(c.env.DB, user.id),
+    getBoss(c.env.DB, user.id),
   ]);
   const payload = buildJsonExport({
     user,
     categories,
     allowances,
     vacations,
+    boss,
     appVersion: c.env.APP_VERSION ?? "dev",
   });
   return new Response(JSON.stringify(payload, null, 2), {

@@ -127,6 +127,22 @@ export async function updateCategory(
   return rowToCategory(row);
 }
 
+/** Single category by id, scoped to user — null if not found / not theirs. */
+export async function getCategory(
+  db: D1Database,
+  userId: string,
+  id: string,
+): Promise<Category | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, user_id, name, accrues, color, sort_order, archived, created_at
+       FROM categories WHERE id = ? AND user_id = ?`,
+    )
+    .bind(id, userId)
+    .first<CategoryRow>();
+  return row ? rowToCategory(row) : null;
+}
+
 export async function deleteCategory(
   db: D1Database,
   userId: string,
@@ -276,7 +292,7 @@ export async function listVacationsInYear(
     .prepare(
       `SELECT id, user_id, category_id, start_date, end_date, partial_amount,
               public_desc, internal_desc, cancelled_at, ical_sequence,
-              created_at, updated_at
+              approval_state, created_at, updated_at
        FROM vacations
        WHERE user_id = ?
          AND start_date <= ?
@@ -293,7 +309,7 @@ export async function listAllVacations(db: D1Database, userId: string): Promise<
     .prepare(
       `SELECT id, user_id, category_id, start_date, end_date, partial_amount,
               public_desc, internal_desc, cancelled_at, ical_sequence,
-              created_at, updated_at
+              approval_state, created_at, updated_at
        FROM vacations
        WHERE user_id = ?
        ORDER BY start_date DESC, created_at DESC`,
@@ -312,7 +328,7 @@ export async function getVacation(
     .prepare(
       `SELECT id, user_id, category_id, start_date, end_date, partial_amount,
               public_desc, internal_desc, cancelled_at, ical_sequence,
-              created_at, updated_at
+              approval_state, created_at, updated_at
        FROM vacations WHERE id = ? AND user_id = ?`,
     )
     .bind(id, userId)

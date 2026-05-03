@@ -14,7 +14,7 @@
  * try to migrate off. See CLAUDE.md "Data export contract".
  */
 
-import type { Allowance, Category, User, Vacation } from "../../shared/types.js";
+import type { Allowance, BossRelationship, Category, User, Vacation } from "../../shared/types.js";
 import { vacationDayCost } from "../../shared/vacation-math.js";
 
 /** Schema version of the JSON dump — bump if the shape changes incompatibly. */
@@ -38,6 +38,12 @@ export interface JsonExport {
   categories: Category[];
   allowances: Allowance[];
   vacations: Vacation[];
+  /**
+   * Boss relationship if any. Single object (the schema supports one per
+   * user). Token fields are deliberately NOT included — they're credential
+   * material. Approval history per vacation lives on `vacations.approval_state`.
+   */
+  boss: BossRelationship | null;
 }
 
 export function buildJsonExport(input: {
@@ -45,6 +51,7 @@ export function buildJsonExport(input: {
   categories: Category[];
   allowances: Allowance[];
   vacations: Vacation[];
+  boss: BossRelationship | null;
   appVersion: string;
   now?: Date;
 }): JsonExport {
@@ -67,6 +74,7 @@ export function buildJsonExport(input: {
     categories: input.categories,
     allowances: input.allowances,
     vacations: input.vacations,
+    boss: input.boss,
   };
 }
 

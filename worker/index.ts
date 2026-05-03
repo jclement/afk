@@ -20,6 +20,7 @@ import type { HonoVars } from "./types.js";
 import { err, ok } from "./lib/responses.js";
 import { purgeExpiredSessions } from "./lib/sessions.js";
 import { purgeExpiredEmailVerifications } from "./lib/users.js";
+import { purgeExpiredBossTokens } from "./lib/boss-store.js";
 
 import authRoutes from "./routes/auth.js";
 import categoryRoutes from "./routes/categories.js";
@@ -29,6 +30,8 @@ import meRoutes from "./routes/me.js";
 import emailVerifyRoutes from "./routes/email-verify.js";
 import { feedApi, tokensApi } from "./routes/ical.js";
 import pdfRoutes from "./routes/pdf.js";
+import bossRoutes from "./routes/boss.js";
+import bossPublicRoutes from "./routes/boss-public.js";
 
 const app = new Hono<HonoVars>();
 
@@ -103,8 +106,13 @@ app.route("/api/v1/passkeys", passkeyRoutes);
 app.route("/api/v1/me", meRoutes);
 app.route("/api/v1/ical-tokens", tokensApi);
 app.route("/api/v1/pdf", pdfRoutes);
+app.route("/api/v1/boss", bossRoutes);
 app.route("/ical", feedApi);
 app.route("/verify-email", emailVerifyRoutes);
+// Public boss flow (consent + approve). HTML pages, no auth — magic link
+// in the URL is the auth. Mounted outside /api/v1 because the boss has no
+// AFK account; they're reaching us straight from their inbox.
+app.route("/boss", bossPublicRoutes);
 
 // API 404 fallback (the SPA handles non-/api 404s).
 app.all("/api/*", (c) => err(c, "NOT_FOUND", "API route not found."));
@@ -133,6 +141,7 @@ export default {
       Promise.allSettled([
         run("purgeExpiredSessions", () => purgeExpiredSessions(env.DB)),
         run("purgeExpiredEmailVerifications", () => purgeExpiredEmailVerifications(env.DB)),
+        run("purgeExpiredBossTokens", () => purgeExpiredBossTokens(env.DB)),
       ]).then(() => undefined),
     );
   },

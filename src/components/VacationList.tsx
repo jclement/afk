@@ -79,6 +79,7 @@ function VacationRow({
       </td>
       <td className="px-3 py-2">
         <CategoryPill category={v.category} />
+        <ApprovalBadge state={v.approval_state} />
       </td>
       <td className="px-3 py-2 font-mono">{cost.toString()}</td>
       <td className="px-3 py-2 text-subtle truncate max-w-[280px]">
@@ -109,8 +110,9 @@ function VacationCard({
   const note = v.public_desc || v.internal_desc || "";
   return (
     <div className={`card p-3 flex flex-col gap-2 ${isCancelled ? "opacity-70" : ""}`}>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <CategoryPill category={v.category} />
+        <ApprovalBadge state={v.approval_state} />
         <span className="font-mono text-xs text-subtle ml-auto">{cost.toString()} d</span>
       </div>
       <div
@@ -138,6 +140,22 @@ function CategoryPill({ category }: { category: Category | null }) {
   return (
     <span className="pill" style={{ backgroundColor: category.color }}>
       {category.name}
+    </span>
+  );
+}
+
+/**
+ * Approval state pill — only renders when there's something to say. Pending
+ * is the visible one (the user is waiting on the boss); approved/rejected
+ * are usually combined with the cancelled-strikethrough so we don't shout.
+ */
+function ApprovalBadge({ state }: { state: import("@shared/types").ApprovalState | null }) {
+  if (!state || state === "approved") return null;
+  const bg = state === "pending" ? "var(--color-warning)" : "var(--color-danger)"; // rejected
+  const label = state === "pending" ? "Pending boss" : "Rejected";
+  return (
+    <span className="pill" style={{ backgroundColor: bg }} title={label}>
+      {label}
     </span>
   );
 }

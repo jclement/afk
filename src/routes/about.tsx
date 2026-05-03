@@ -39,6 +39,33 @@ function AboutPage() {
       </section>
 
       <section className="card p-4 flex flex-col gap-2 text-sm">
+        <h2 className="text-sm font-semibold text-heading">Boss / approver (optional)</h2>
+        <p>You can add a boss or approver email in Settings. Two modes:</p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>
+            <strong className="text-heading">Notify</strong> — they get a calendar invite for every
+            vacation you book. No approval gate. Honour-system; great for managers who just want
+            visibility.
+          </li>
+          <li>
+            <strong className="text-heading">Requires approval</strong> — your booking enters as{" "}
+            <em>pending</em> on your calendar. Your boss gets a one-click link to approve or reject.
+            Calendar invites only fire on approval. Rejection cancels the booking and emails the
+            comment back to you.
+          </li>
+        </ul>
+        <p>
+          The boss doesn't need an AFK account. They consent once via a verification email, and can
+          opt out by replying to any email and asking you to remove them. You can remove them
+          yourself at any time from Settings.
+        </p>
+        <p>
+          The whole feature is optional and off by default. Email/calendar invites only fire when
+          you've verified your own email AND added a boss who consented.
+        </p>
+      </section>
+
+      <section className="card p-4 flex flex-col gap-2 text-sm">
         <h2 className="text-sm font-semibold text-heading">No guarantees</h2>
         <p>This is not a mission-critical, production-grade application. Use at your own risk.</p>
         <p>

@@ -89,29 +89,33 @@ programmatic clients aren't supported (it's a personal app).
 
 ### Key endpoints
 
-| Method                        | Path                                                | Description                                        |
-| ----------------------------- | --------------------------------------------------- | -------------------------------------------------- |
-| `GET`                         | `/api/v1/health`                                    | Liveness probe — no auth                           |
-| `GET`                         | `/api/v1/auth/status`                               | First-run check (`has_users`)                      |
-| `GET`                         | `/api/v1/auth/me`                                   | Current user (or 401)                              |
-| `POST`                        | `/api/v1/auth/register/start` & `/finish`           | Passkey registration                               |
-| `POST`                        | `/api/v1/auth/login/start` & `/finish`              | Passkey authentication                             |
-| `POST`                        | `/api/v1/auth/logout`                               | Destroy session                                    |
-| `GET` `POST` `PATCH` `DELETE` | `/api/v1/categories[/:id]`                          | Category CRUD                                      |
-| `GET` `PUT`                   | `/api/v1/categories/allowances/:year[/:categoryId]` | Allowance per year                                 |
-| `GET`                         | `/api/v1/vacations/summary/:year`                   | Year summary (widgets + list)                      |
-| `POST` `PATCH`                | `/api/v1/vacations[/:id]`                           | Vacation CRUD                                      |
-| `POST`                        | `/api/v1/vacations/:id/cancel`                      | Soft-cancel a vacation                             |
-| `GET` `POST` `DELETE`         | `/api/v1/passkeys[/:id]`                            | Manage passkeys                                    |
-| `GET` `POST` `DELETE`         | `/api/v1/ical-tokens[/:id]`                         | Manage iCal feed tokens                            |
-| `GET`                         | `/api/v1/pdf/:year`                                 | Render year summary as PDF                         |
-| `PATCH` `DELETE`              | `/api/v1/me/email`                                  | Set / clear email (triggers verification mail)     |
-| `POST`                        | `/api/v1/me/email/resend`                           | Resend the email-verification link                 |
-| `PATCH`                       | `/api/v1/me/timezone`                               | Update IANA timezone                               |
-| `GET`                         | `/api/v1/me/export.json`                            | Full data dump (categories, allowances, vacations) |
-| `GET`                         | `/api/v1/me/export.csv`                             | Vacations as a flat CSV with category info         |
-| `GET`                         | `/ical/:token.ics`                                  | Public-facing iCal feed (token-authenticated)      |
-| `GET`                         | `/verify-email/:token`                              | Email-verification redirect (link from inbox)      |
+| Method                        | Path                                                | Description                                          |
+| ----------------------------- | --------------------------------------------------- | ---------------------------------------------------- |
+| `GET`                         | `/api/v1/health`                                    | Liveness probe — no auth                             |
+| `GET`                         | `/api/v1/auth/status`                               | First-run check (`has_users`)                        |
+| `GET`                         | `/api/v1/auth/me`                                   | Current user (or 401)                                |
+| `POST`                        | `/api/v1/auth/register/start` & `/finish`           | Passkey registration                                 |
+| `POST`                        | `/api/v1/auth/login/start` & `/finish`              | Passkey authentication                               |
+| `POST`                        | `/api/v1/auth/logout`                               | Destroy session                                      |
+| `GET` `POST` `PATCH` `DELETE` | `/api/v1/categories[/:id]`                          | Category CRUD                                        |
+| `GET` `PUT`                   | `/api/v1/categories/allowances/:year[/:categoryId]` | Allowance per year                                   |
+| `GET`                         | `/api/v1/vacations/summary/:year`                   | Year summary (widgets + list)                        |
+| `POST` `PATCH`                | `/api/v1/vacations[/:id]`                           | Vacation CRUD                                        |
+| `POST`                        | `/api/v1/vacations/:id/cancel`                      | Soft-cancel a vacation                               |
+| `GET` `POST` `DELETE`         | `/api/v1/passkeys[/:id]`                            | Manage passkeys                                      |
+| `GET` `POST` `DELETE`         | `/api/v1/ical-tokens[/:id]`                         | Manage iCal feed tokens                              |
+| `GET`                         | `/api/v1/pdf/:year`                                 | Render year summary as PDF                           |
+| `PATCH` `DELETE`              | `/api/v1/me/email`                                  | Set / clear email (triggers verification mail)       |
+| `POST`                        | `/api/v1/me/email/resend`                           | Resend the email-verification link                   |
+| `PATCH`                       | `/api/v1/me/timezone`                               | Update IANA timezone                                 |
+| `GET`                         | `/api/v1/me/export.json`                            | Full data dump (categories, allowances, vacations)   |
+| `GET`                         | `/api/v1/me/export.csv`                             | Vacations as a flat CSV with category info           |
+| `GET` `PUT` `DELETE`          | `/api/v1/boss`                                      | Manage your single boss / approver                   |
+| `POST`                        | `/api/v1/boss/resend-consent`                       | Re-send the consent link to your boss                |
+| `GET`                         | `/ical/:token.ics`                                  | Public-facing iCal feed (token-authenticated)        |
+| `GET`                         | `/verify-email/:token`                              | Email-verification redirect (link from inbox)        |
+| `GET` `POST`                  | `/boss/consent/:token`                              | Public consent page (boss has no AFK account)        |
+| `GET` `POST`                  | `/boss/approve/:token`                              | Public approve/reject page (boss has no AFK account) |
 
 ## Deployment
 

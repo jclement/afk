@@ -138,9 +138,15 @@ The export tests look for an "ADD A NEW ASSERTION HERE" anchor comment —
 keep it there as a tripwire for future contributors.
 
 **What to exclude from exports:** secrets and credentials (passkey public
-keys, session tokens, iCal feed tokens, email-verification tokens). These
-are device/keystore artefacts, not user data; they don't survive a migration
-and exposing them in a download is a credential-leak risk.
+keys, session tokens, iCal feed tokens, email-verification tokens, boss
+consent/decision tokens). These are device/keystore artefacts, not user
+data; they don't survive a migration and exposing them in a download is a
+credential-leak risk.
+
+The export DOES include relationships even when one side is external —
+e.g. `boss_relationships` rows are user data even though the boss
+themselves has no account. Anything the user authored or chose belongs in
+the dump.
 
 ## Bootstrapping Sequence
 

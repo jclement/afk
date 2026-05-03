@@ -142,23 +142,33 @@ feedApi.get("/:token", async (c) => {
   });
 
   for (const v of vacations) {
+    // Approval mode lifecycle:
+    //   approval_state = null      → no boss / notify mode → treat as confirmed
+    //   approval_state = 'pending' → TENTATIVE on the user's private feed,
+    //                                hidden from the public feed (no point
+    //                                broadcasting an unconfirmed booking to
+    //                                the team)
+    //   approval_state = 'approved' → confirmed
+    //   approval_state = 'rejected' → treat as cancelled
+    const isPending = v.approval_state === "pending";
+    const isRejected = v.approval_state === "rejected";
+    const isCancelled = !!v.cancelled_at || isRejected;
+    if (lookup.scope === "public" && (isPending || isRejected)) continue;
+
     const start = parseISODate(v.start_date);
     // iCal all-day events are end-exclusive — bump end by 1 day.
     const endInclusive = parseISODate(v.end_date);
     const endExclusive = new Date(endInclusive.getTime() + 86_400_000);
     const cat = catsById.get(v.category_id);
-    const summary =
+    const baseSummary =
       lookup.scope === "private"
         ? `[${cat?.name ?? "AFK"}] ${v.public_desc || "Out of Office"}`
         : v.public_desc || "Out of Office";
+    const summary = isPending ? `[Pending] ${baseSummary}` : baseSummary;
     const description =
       lookup.scope === "private"
         ? buildPrivateDescription(v, cat?.name ?? null)
         : v.public_desc || "Out of Office";
-    // Cancelled vacations: emit the event with STATUS:CANCELLED + a
-    // strictly-greater SEQUENCE so subscribed calendars (Apple/Google/
-    // Outlook) reliably remove it. Silently dropping the row was unreliable
-    // — clients sometimes leave the old event hanging for days.
     cal.createEvent({
       id: `${v.id}@afk`,
       sequence: v.ical_sequence,
@@ -167,11 +177,18 @@ feedApi.get("/:token", async (c) => {
       allDay: true,
       summary,
       description,
-      status: v.cancelled_at ? ICalEventStatus.CANCELLED : ICalEventStatus.CONFIRMED,
-      busystatus: v.cancelled_at ? ICalEventBusyStatus.FREE : ICalEventBusyStatus.OOF,
-      transparency: v.cancelled_at
-        ? ICalEventTransparency.TRANSPARENT
-        : ICalEventTransparency.OPAQUE,
+      status: isCancelled
+        ? ICalEventStatus.CANCELLED
+        : isPending
+          ? ICalEventStatus.TENTATIVE
+          : ICalEventStatus.CONFIRMED,
+      busystatus: isCancelled
+        ? ICalEventBusyStatus.FREE
+        : isPending
+          ? ICalEventBusyStatus.TENTATIVE
+          : ICalEventBusyStatus.OOF,
+      transparency:
+        isCancelled || isPending ? ICalEventTransparency.TRANSPARENT : ICalEventTransparency.OPAQUE,
     });
   }
   const headers = new Headers({

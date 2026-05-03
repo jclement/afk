@@ -40,6 +40,7 @@ const vacation: Vacation = {
   internal_desc: "",
   cancelled_at: null,
   ical_sequence: 0,
+  approval_state: null,
   created_at: "2026-04-01",
   updated_at: "2026-04-01",
 };

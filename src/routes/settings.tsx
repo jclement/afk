@@ -6,28 +6,43 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, KeyRound, Copy, Check, Mail, Globe, Download } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  KeyRound,
+  Copy,
+  Check,
+  Mail,
+  Globe,
+  Download,
+  UserCheck,
+} from "lucide-react";
 import {
   useAllowances,
+  useBoss,
   useCategories,
   useClearEmail,
   useCreateCategory,
   useCreateICalToken,
+  useDeleteBoss,
   useDeleteCategory,
   useDeleteICalToken,
   useDeletePasskey,
   useICalTokens,
   usePasskeys,
   useRenamePasskey,
+  useResendBossConsent,
   useResendEmailVerification,
   useSetEmail,
   useSetTimezone,
   useUpdateCategory,
   useUpsertAllowance,
+  useUpsertBoss,
 } from "../api/hooks";
 import { registerPasskey } from "../lib/passkey-client";
 import { useMe } from "../api/hooks";
 import { currentYearInTimezone } from "../../shared/vacation-math";
+import type { BossRelationship } from "@shared/types";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -48,9 +63,257 @@ function SettingsPage() {
       <TimezoneSection />
       <EmailSection />
       <CategoriesSection year={year} />
+      <BossSection />
       <PasskeysSection />
       <ICalSection />
       <ExportSection />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Boss / approver — opt-in. Notify mode emails the boss for every booking;
+// approval mode requires them to click Approve before the calendar fires.
+// ---------------------------------------------------------------------------
+function BossSection() {
+  const me = useMe();
+  const boss = useBoss();
+  const upsert = useUpsertBoss();
+  const resend = useResendBossConsent();
+  const remove = useDeleteBoss();
+
+  const [editing, setEditing] = useState(false);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [mode, setMode] = useState<"notify" | "approval">("notify");
+  const [error, setError] = useState<string | null>(null);
+
+  // Pre-fill on edit; reset on cancel.
+  function startEdit() {
+    setEmail(boss.data?.boss_email ?? "");
+    setName(boss.data?.boss_display_name ?? "");
+    setMode(boss.data?.mode ?? "notify");
+    setError(null);
+    setEditing(true);
+  }
+  function cancelEdit() {
+    setEditing(false);
+    setError(null);
+  }
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    upsert.mutate(
+      { boss_email: email.trim().toLowerCase(), boss_display_name: name.trim(), mode },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (err) => setError((err as Error).message),
+      },
+    );
+  }
+
+  const userEmailOk = !!me.data?.email_verified_at;
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <UserCheck className="w-4 h-4" aria-hidden="true" /> Boss / approver
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        Optional. Pick a manager (or anyone) to receive your vacation calendar — and optionally to
+        approve it before it goes live. Honour-system; they don't need an AFK account, just an email
+        and a one-click consent. You can remove them any time.
+      </p>
+
+      {!userEmailOk && (
+        <div
+          role="alert"
+          className="text-xs rounded border border-[color:var(--color-warning)] bg-[color:var(--color-warning)]/10 text-[color:var(--color-warning)] px-3 py-2 mb-3"
+        >
+          Verify your own email above first — your boss replies to you, not us.
+        </div>
+      )}
+
+      {!editing && !boss.data && (
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={startEdit}
+          disabled={!userEmailOk}
+        >
+          <Plus className="w-4 h-4" aria-hidden="true" /> Add boss / approver
+        </button>
+      )}
+
+      {!editing && boss.data && (
+        <BossSummary
+          boss={boss.data}
+          onEdit={startEdit}
+          onRemove={() => remove.mutate()}
+          onResend={() => resend.mutate()}
+          resendPending={resend.isPending}
+        />
+      )}
+
+      {editing && (
+        <form onSubmit={save} className="grid gap-3 max-w-lg">
+          <div>
+            <label className="label" htmlFor="boss-name">
+              Their display name
+            </label>
+            <input
+              id="boss-name"
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Greg from Accounting"
+              required
+              maxLength={100}
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="label" htmlFor="boss-email">
+              Their email
+            </label>
+            <input
+              id="boss-email"
+              className="input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="greg@example.com"
+              required
+              autoComplete="off"
+            />
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="label mb-1">Mode</legend>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="mode"
+                checked={mode === "notify"}
+                onChange={() => setMode("notify")}
+                className="mt-1"
+              />
+              <span>
+                <strong className="text-heading">Notify.</strong>{" "}
+                <span className="text-subtle">
+                  They get a calendar invite for every vacation. No approval gate.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="mode"
+                checked={mode === "approval"}
+                onChange={() => setMode("approval")}
+                className="mt-1"
+              />
+              <span>
+                <strong className="text-heading">Requires approval.</strong>{" "}
+                <span className="text-subtle">
+                  Vacations enter as <em>pending</em> on your calendar. They get a one-click
+                  approve/reject link. Calendar invites only fire on approval; rejection cancels the
+                  booking and emails the comment back to you.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          {error && (
+            <div role="alert" className="text-sm text-[color:var(--color-danger)]">
+              {error}
+            </div>
+          )}
+          <div className="flex gap-2 mt-1">
+            <button type="submit" className="btn btn-primary" disabled={upsert.isPending}>
+              {upsert.isPending
+                ? "Sending consent…"
+                : boss.data
+                  ? "Save & re-send consent"
+                  : "Save & send consent email"}
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={cancelEdit}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function BossSummary({
+  boss,
+  onEdit,
+  onRemove,
+  onResend,
+  resendPending,
+}: {
+  boss: BossRelationship;
+  onEdit: () => void;
+  onRemove: () => void;
+  onResend: () => void;
+  resendPending: boolean;
+}) {
+  const status = boss.consent_status;
+  const statusBg =
+    status === "consented"
+      ? "var(--color-success)"
+      : status === "revoked"
+        ? "var(--color-danger)"
+        : "var(--color-warning)";
+  const statusLabel =
+    status === "consented" ? "Consented" : status === "revoked" ? "Revoked" : "Awaiting consent";
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap gap-2 items-center text-sm">
+        <span className="pill" style={{ background: statusBg }} title={`Status: ${statusLabel}`}>
+          {statusLabel}
+        </span>
+        <span className="font-medium text-heading">{boss.boss_display_name}</span>
+        <span className="text-subtle">&lt;{boss.boss_email}&gt;</span>
+      </div>
+      <div className="text-xs text-subtle">
+        Mode:{" "}
+        <strong className="text-heading">
+          {boss.mode === "approval" ? "Requires approval" : "Notify"}
+        </strong>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn btn-secondary" onClick={onEdit}>
+          Edit
+        </button>
+        {status === "pending" && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onResend}
+            disabled={resendPending}
+          >
+            <Mail className="w-4 h-4" aria-hidden="true" />
+            {resendPending ? "Sending…" : "Resend consent"}
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn-danger"
+          onClick={() => {
+            if (
+              window.confirm(
+                "Remove this boss? Future vacations won't be sent to them. Already-sent calendar invites stay on their calendar.",
+              )
+            ) {
+              onRemove();
+            }
+          }}
+        >
+          <Trash2 className="w-4 h-4" aria-hidden="true" /> Remove
+        </button>
+      </div>
     </div>
   );
 }

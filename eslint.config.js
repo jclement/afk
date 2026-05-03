@@ -37,6 +37,7 @@ export default [
         TextDecoder: "readonly",
         AbortSignal: "readonly",
         AbortController: "readonly",
+        RequestInfo: "readonly",
         queueMicrotask: "readonly",
         HTMLElement: "readonly",
         HTMLDivElement: "readonly",

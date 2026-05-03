@@ -57,6 +57,13 @@ export interface Vacation {
   cancelled_at: string | null;
   /** Bumped on every change. Used as iCalendar SEQUENCE in invite emails. */
   ical_sequence: number;
+  /**
+   * Approval state when the user has a boss in approval mode. NULL when no
+   * boss is set up or the boss is in notify mode (no gate). For pending the
+   * vacation appears as TENTATIVE on the user's calendar; rejected behaves
+   * like cancelled.
+   */
+  approval_state: ApprovalState | null;
   created_at: string;
   updated_at: string;
 }
@@ -110,6 +117,32 @@ export interface PasskeyMeta {
   backed_up: boolean;
   created_at: string;
   last_used_at: string | null;
+}
+
+export type BossMode = "notify" | "approval";
+export type BossConsentStatus = "pending" | "consented" | "revoked";
+export type ApprovalState = "pending" | "approved" | "rejected";
+
+export interface BossRelationship {
+  id: string;
+  user_id: string;
+  boss_email: string;
+  boss_display_name: string;
+  mode: BossMode;
+  consent_status: BossConsentStatus;
+  consented_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface VacationApproval {
+  id: string;
+  vacation_id: string;
+  boss_relationship_id: string;
+  state: ApprovalState;
+  decided_at: string | null;
+  decision_comment: string | null;
+  created_at: string;
 }
 
 export interface ApiError {

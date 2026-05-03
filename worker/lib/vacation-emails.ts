@@ -40,6 +40,14 @@ export async function sendVacationLifecycleEmail(
       ? `afk@${env.MAILGUN_DOMAIN}`
       : "afk@invalid";
 
+  // Approval-mode lifecycle: TENTATIVE while awaiting boss decision so the
+  // user's calendar visually flags the booking as not-yet-approved.
+  const status: "CONFIRMED" | "CANCELLED" | "TENTATIVE" =
+    method === "CANCEL"
+      ? "CANCELLED"
+      : vacation.approval_state === "pending"
+        ? "TENTATIVE"
+        : "CONFIRMED";
   const ics = buildInviteIcs({
     user,
     vacation,
@@ -48,6 +56,8 @@ export async function sendVacationLifecycleEmail(
     method,
     sequence: vacation.ical_sequence,
     appOrigin,
+    status,
+    summaryPrefix: status === "TENTATIVE" ? "Pending" : undefined,
   });
 
   const subject = subjectFor(method, vacation, category);
@@ -70,7 +80,9 @@ export async function sendVacationLifecycleEmail(
 
 function subjectFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category | null): string {
   const summary = inviteSummary(cat, v);
-  return method === "CANCEL" ? `Cancelled: ${summary}` : summary;
+  if (method === "CANCEL") return `Cancelled: ${summary}`;
+  if (v.approval_state === "pending") return `Pending: ${summary}`;
+  return summary;
 }
 
 function plainBodyFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category | null): string {

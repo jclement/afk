@@ -25,7 +25,7 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # Worker handles API and iCal routes; asset lookup would otherwise serve the
 # SPA fallback for /api/* and break things like the PDF route.
-run_worker_first = ["/api/*", "/ical/*", "/verify-email/*"]
+run_worker_first = ["/api/*", "/ical/*", "/verify-email/*", "/boss/*"]
 
 [[env.test.d1_databases]]
 binding = "DB"
@@ -70,7 +70,7 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 # Worker handles API and iCal routes; asset lookup would otherwise serve the
 # SPA fallback for /api/* and break things like the PDF route.
-run_worker_first = ["/api/*", "/ical/*", "/verify-email/*"]
+run_worker_first = ["/api/*", "/ical/*", "/verify-email/*", "/boss/*"]
 
 [[env.production.d1_databases]]
 binding = "DB"

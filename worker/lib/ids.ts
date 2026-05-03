@@ -22,6 +22,18 @@ export function newICalToken(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Token for boss consent + approval magic links. 32 bytes -> 64 hex chars.
+ * These tokens are emailed to humans who paste-and-click; the entropy and
+ * format match the email-verification token so the routing/format gates can
+ * share a regex.
+ */
+export function newBossToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Constant-time comparison for opaque tokens. */
 export function tokensEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

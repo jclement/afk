@@ -11,6 +11,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { API_BASE, api } from "../lib/api";
 import type {
   Allowance,
+  BossMode,
+  BossRelationship,
   Category,
   CategorySummary,
   ICalToken,
@@ -331,5 +333,44 @@ export function useDeleteICalToken() {
   return useMutation({
     mutationFn: (id: string) => api(`${API_BASE}/ical-tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ical-tokens"] }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Boss / approver
+// ---------------------------------------------------------------------------
+
+export function useBoss() {
+  return useQuery<BossRelationship | null>({
+    queryKey: ["boss"],
+    queryFn: () => api<BossRelationship | null>(`${API_BASE}/boss`),
+  });
+}
+
+export function useUpsertBoss() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { boss_email: string; boss_display_name: string; mode: BossMode }) =>
+      api<BossRelationship>(`${API_BASE}/boss`, {
+        method: "PUT",
+        json: body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["boss"] }),
+  });
+}
+
+export function useResendBossConsent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<BossRelationship>(`${API_BASE}/boss/resend-consent`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["boss"] }),
+  });
+}
+
+export function useDeleteBoss() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api(`${API_BASE}/boss`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["boss"] }),
   });
 }

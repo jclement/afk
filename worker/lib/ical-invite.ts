@@ -29,6 +29,20 @@ export interface InviteOpts {
   sequence: number;
   /** Human-readable origin domain for PRODID + DESCRIPTION footer. */
   appOrigin: string;
+  /**
+   * Per-event lifecycle status. Defaults to CONFIRMED on PUBLISH and
+   * CANCELLED on CANCEL. Pass `"TENTATIVE"` for vacations awaiting boss
+   * approval — calendar clients render those visually distinct (Apple
+   * shows them with a hatched fill, Google/Outlook with grey).
+   */
+  status?: "CONFIRMED" | "CANCELLED" | "TENTATIVE";
+  /**
+   * Optional `[Pending]` / `[Approved]` / `[Rejected]` prefix on the
+   * SUMMARY line so even calendars that ignore STATUS make the state
+   * visible. Pass `"PENDING"` for tentative bookings; the helper appends
+   * the right prefix and leaves CONFIRMED/CANCELLED untouched.
+   */
+  summaryPrefix?: string;
 }
 
 /**
@@ -50,8 +64,11 @@ export function inviteSummary(
 
 export function buildInviteIcs(opts: InviteOpts): string {
   const { vacation, category, organizerEmail, method, sequence } = opts;
+  const status: "CONFIRMED" | "CANCELLED" | "TENTATIVE" =
+    opts.status ?? (method === "CANCEL" ? "CANCELLED" : "CONFIRMED");
   const uid = `${vacation.id}@afk`;
-  const summary = inviteSummary(category, vacation);
+  const baseSummary = inviteSummary(category, vacation);
+  const summary = opts.summaryPrefix ? `[${opts.summaryPrefix}] ${baseSummary}` : baseSummary;
   const dtstamp = utcStamp(new Date());
   const dtstart = vacation.start_date.replaceAll("-", "");
   const dtend = formatExclusiveEnd(vacation.end_date);
@@ -95,11 +112,17 @@ export function buildInviteIcs(opts: InviteOpts): string {
   // X-ALT-DESC is Outlook's hook for HTML-rendered descriptions. Other
   // clients ignore it harmlessly.
   lines.push(`X-ALT-DESC;FMTTYPE=text/html:${escapeText(html)}`);
-  lines.push("TRANSP:OPAQUE");
-  lines.push("X-MICROSOFT-CDO-BUSYSTATUS:OOF");
-  lines.push("X-MICROSOFT-CDO-INTENDEDSTATUS:OOF");
+  // TRANSP=TRANSPARENT for tentative/cancelled so they don't block the slot
+  // on the receiver's calendar; OPAQUE for confirmed bookings = "I'm out."
+  lines.push(`TRANSP:${status === "CONFIRMED" ? "OPAQUE" : "TRANSPARENT"}`);
+  lines.push(
+    `X-MICROSOFT-CDO-BUSYSTATUS:${status === "CONFIRMED" ? "OOF" : status === "TENTATIVE" ? "TENTATIVE" : "FREE"}`,
+  );
+  lines.push(
+    `X-MICROSOFT-CDO-INTENDEDSTATUS:${status === "CONFIRMED" ? "OOF" : status === "TENTATIVE" ? "TENTATIVE" : "FREE"}`,
+  );
   lines.push(`SEQUENCE:${sequence}`);
-  lines.push(`STATUS:${method === "CANCEL" ? "CANCELLED" : "CONFIRMED"}`);
+  lines.push(`STATUS:${status}`);
   // ORGANIZER on a PUBLISH event is informational — receiving calendars use
   // it as the "from" name on the event card but don't send replies. We keep
   // SENT-BY on the address so any calendar that *does* try to reach out

@@ -250,13 +250,59 @@ is a flat vacations-with-category-info view with computed day costs, RFC 4180-co
 schema lives in `worker/lib/export.ts` and is the single source of truth — see CLAUDE.md
 "Data Export Contract" for the rules around extending it when new columns/tables are added.
 
+## Boss / approver (optional, opt-in)
+
+Users can add a single boss or approver — an external email with no AFK account — in two
+modes:
+
+- **Notify** — every vacation lifecycle event (create / cancel / delete) fans out a copy of the
+  same iCal invite the user gets to themselves. Subject leads with the user's `display_name`
+  (not username, not email — fits in a notification preview).
+- **Requires approval** — the vacation enters as `approval_state = 'pending'`. The user's own
+  iCal invite goes out with `STATUS:TENTATIVE` (Apple/Google/Outlook render visually distinct).
+  The boss gets an approval-request email with a magic link to a server-rendered HTML page
+  showing the dates, days, and the user's category balance. Approve flips the state to
+  `approved` and re-fires confirmed iCal to both parties; reject flips to `rejected`, sets
+  `cancelled_at`, requires a comment, and emails the comment back to the user.
+
+Two new tables (`migrations/0005_boss.sql`):
+
+| Table                | Purpose                               | Notable columns                                                                               |
+| -------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `boss_relationships` | One per user                          | `boss_email`, `boss_display_name`, `mode`, `consent_token`, `consented_at`, `revoked_at`      |
+| `vacation_approvals` | Per (vacation, boss) approval request | `state` (`pending`/`approved`/`rejected`), `decision_token`, `decided_at`, `decision_comment` |
+
+`vacations.approval_state` is denormalised onto the row so the dashboard query doesn't need a
+join. Tokens are 64-char hex (32 bytes), single-use after the action, with a 7-day TTL on
+consent and 14-day TTL on decisions. Public boss pages (`/boss/consent/:token`,
+`/boss/approve/:token`) live outside `/api/v1` because the boss has no account — the URL token
+IS the auth, format-gated to constant-time-404 bogus probes.
+
+Calendar lifecycle in approval mode:
+
+```
+user creates → approval_state=pending → user iCal: TENTATIVE, [Pending] in summary
+                                       → boss email: approval-request (NO iCal yet)
+boss approves → approval_state=approved → user iCal: CONFIRMED
+                                        → boss iCal: PUBLISH (CONFIRMED)
+                                        → user receipt email
+boss rejects  → approval_state=rejected → vacation cancelled_at = now
+                                        → user iCal: CANCEL
+                                        → boss iCal: CANCEL (no-op if they never had it)
+                                        → user receipt email with the comment
+```
+
+The public iCal feed (`/ical/:token`) shows pending/rejected entries on the **private** scope
+only — the public scope omits them entirely so a user's team doesn't see speculative bookings.
+
 ## Daily cron
 
-`wrangler.toml [env.*.triggers]` runs `worker/index.ts#scheduled` daily at 04:00 UTC. Two
-purges: expired session rows (`sessions.expires_at < now`) and expired email-verification
-tokens. Both compare via `julianday()` because the stored ISO timestamps don't sort
-lexicographically against SQLite's `datetime('now')` format. Each task is wrapped so a single
-failure doesn't take down the other, and start/end log lines leave breadcrumbs in `wrangler tail`.
+`wrangler.toml [env.*.triggers]` runs `worker/index.ts#scheduled` daily at 04:00 UTC. Three
+purges: expired session rows (`sessions.expires_at < now`), expired email-verification tokens,
+and expired boss tokens (consent + approval). All compare via `julianday()` because the stored
+ISO timestamps don't sort lexicographically against SQLite's `datetime('now')` format. Each
+task is wrapped so a single failure doesn't take down the others, and start/end log lines
+leave breadcrumbs in `wrangler tail`.
 
 - **Session secret.** `SESSION_SECRET` is reserved but currently unused — sessions rely on
   unguessable random IDs (256 bits) and a server-side row. We'd need this if we ever switched
