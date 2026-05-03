@@ -17,13 +17,16 @@ locked and only adding additional passkeys to your own account is allowed.
                  |                                                          |
   Browser  --->  |  Worker (Hono)                                           |
                  |   ├── /api/v1/* ── auth, categories, vacations, ical,    |
-                 |   │                pdf, passkeys, health                 |
+                 |   │                pdf, passkeys, boss, share, health    |
                  |   ├── /ical/:tok ── public-facing iCal feeds             |
+                 |   ├── /share/:tk ── public read-only dashboard (SPA)     |
+                 |   ├── /boss/:tok ── public consent + approval pages      |
                  |   └── ASSETS    ── React SPA (Vite build)                |
                  |        │                                                 |
                  |        ├── D1 (DB)        users, sessions, categories,   |
                  |        │                  allowances, vacations,         |
-                 |        │                  credentials, ical_tokens       |
+                 |        │                  credentials, ical_tokens,      |
+                 |        │                  share_tokens, boss tables      |
                  |        ├── KV (KV)        WebAuthn challenges (5m TTL)   |
                  |        └── Browser        Headless Chrome for PDF        |
                  +----------------------------------------------------------+
@@ -143,6 +146,7 @@ categories 1──* vacations
 | `allowances`          | Per-year, per-category budgets   | `year`, `days_allotted`, `days_carryover`, `notes`                                            |
 | `vacations`           | Entries                          | `start_date`, `end_date`, `partial_amount`, `cancelled_at`, `ical_sequence`                   |
 | `ical_tokens`         | Calendar feed tokens             | `scope` (`private`/`public`), `label`, `last_used_at`                                         |
+| `share_tokens`        | Read-only dashboard share links  | `scope` (`current-year`/`all-years`), `label`, `last_viewed_at`                               |
 | `email_verifications` | Pending email-verification links | `token` (32-byte hex), `email`, `expires_at` (24h)                                            |
 
 ## Authentication Flow
@@ -245,10 +249,17 @@ invite to themselves with a stable UID (`{vacation.id}@afk`) and a monotonically
 ## Data export
 
 `GET /api/v1/me/export.json` returns a complete dump of every user-owned table (profile,
-categories, allowances, vacations) in a stable JSON envelope (`schema_version: 1`). `export.csv`
-is a flat vacations-with-category-info view with computed day costs, RFC 4180-compliant. The
-schema lives in `worker/lib/export.ts` and is the single source of truth — see CLAUDE.md
-"Data Export Contract" for the rules around extending it when new columns/tables are added.
+categories, allowances, vacations, boss relationship, share-link metadata) in a stable JSON
+envelope (`schema_version: 1`). `export.csv` is a flat vacations-with-category-info view with
+computed day costs, RFC 4180-compliant. The schema lives in `worker/lib/export.ts` and is the
+single source of truth — see CLAUDE.md "Data Export Contract" for the rules around extending it
+when new columns/tables are added.
+
+Credential-bearing rows expose only their user-authored metadata (`label`, `scope`, timestamps);
+the secret token values are deliberately omitted. iCal tokens are excluded entirely because the
+row IS the credential — without the token there's nothing useful to migrate. Share tokens
+include label/scope/created_at/last_viewed_at as `share_tokens[]` so a migrating user can see
+which links existed even though they can't reconstruct working URLs from the dump.
 
 ## Boss / approver (optional, opt-in)
 
@@ -294,6 +305,41 @@ boss rejects  → approval_state=rejected → vacation cancelled_at = now
 
 The public iCal feed (`/ical/:token`) shows pending/rejected entries on the **private** scope
 only — the public scope omits them entirely so a user's team doesn't see speculative bookings.
+
+## Read-only share links
+
+Users can mint cryptographically-random URLs in Settings to share the dashboard with anyone —
+manager, spouse, accountability buddy. The recipient has no AFK account and never will; the
+URL token IS the auth.
+
+Two scopes are stored on the link itself, not toggled by the visitor:
+
+- **`current-year`** — the visitor always sees the year that's current in the *owner's*
+  timezone. A `?year=` query is ignored. Locks the experience to "what's relevant right now."
+- **`all-years`** — the visitor can pivot through any year that has activity. Server returns
+  an `available_years` list to populate a year picker.
+
+PII filtering is enforced on the server before the response leaves the worker, even though the
+SPA also defends in depth via `hideInternalDesc`:
+
+- `internal_desc` (private notes, e.g. "kid's birthday party") is stripped from every vacation
+- `cancelled_at` rows are filtered out — the share is a "what's planned" snapshot, not the
+  audit log
+- Pending/rejected `approval_state` is preserved so the recipient sees what's tentative,
+  matching the owner's own dashboard
+- No boss/email/account fields ever appear in the payload
+
+Tokens are 24-byte hex (192 bits, same shape as iCal tokens). The `/api/v1/share/:token/...`
+route format-gates malformed tokens to a constant-time 404 with no D1 cost. The public payload
+is served `Cache-Control: private, no-store` (PII per token) and `last_viewed_at` is stamped
+out-of-band via `executionCtx.waitUntil` so a transient D1 write failure doesn't 500 a page
+the visitor already read.
+
+Schema (`migrations/0007_share_tokens.sql`):
+
+| Table          | Purpose                          | Notable columns                                                          |
+| -------------- | -------------------------------- | ------------------------------------------------------------------------ |
+| `share_tokens` | Read-only dashboard share links  | `token`, `scope`, `label`, `last_viewed_at` (FK to `users`, ON DELETE CASCADE) |
 
 ## Daily cron
 

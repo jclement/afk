@@ -6,8 +6,8 @@ Personal vacation tracker that runs on Cloudflare Workers. Pretty. Mobile-friend
 
 AFK tracks how much time off you have left and how badly you've been wasting it. It supports
 multiple categories (Vacation, Flex, whatever else HR invents this quarter), per-year allowances
-with carryover, partial days, an iCal feed for Outlook/Google Calendar, and a charmingly bitter
-PDF export. Authentication is passkey-only.
+with carryover, partial days, an iCal feed for Outlook/Google Calendar, read-only share links
+for managers/spouses, and a charmingly bitter PDF export. Authentication is passkey-only.
 
 Designed for one person — yours truly — but it'll happily host a single account on a
 self-deployed Cloudflare Worker at `afk.onewheelgeek.net`.
@@ -57,7 +57,7 @@ Local secrets live in `.dev.vars` (gitignored). Production values live in
 
 Defined in `wrangler.toml`:
 
-- **D1** — `DB` — stores users, credentials, sessions, categories, allowances, vacations, iCal tokens, email verifications
+- **D1** — `DB` — stores users, credentials, sessions, categories, allowances, vacations, iCal tokens, share tokens, email verifications, boss relationships
 - **KV** — `KV` — stores WebAuthn challenges with a 5-minute TTL
 - **Browser Rendering** — `BROWSER` — renders the year-summary PDF
 - **Assets** — `ASSETS` — serves the built React SPA (production)
@@ -104,6 +104,7 @@ programmatic clients aren't supported (it's a personal app).
 | `POST`                        | `/api/v1/vacations/:id/cancel`                      | Soft-cancel a vacation                               |
 | `GET` `POST` `DELETE`         | `/api/v1/passkeys[/:id]`                            | Manage passkeys                                      |
 | `GET` `POST` `DELETE`         | `/api/v1/ical-tokens[/:id]`                         | Manage iCal feed tokens                              |
+| `GET` `POST` `DELETE`         | `/api/v1/share-tokens[/:id]`                        | Manage read-only dashboard share links               |
 | `GET`                         | `/api/v1/pdf/:year`                                 | Render year summary as PDF                           |
 | `PATCH` `DELETE`              | `/api/v1/me/email`                                  | Set / clear email (triggers verification mail)       |
 | `POST`                        | `/api/v1/me/email/resend`                           | Resend the email-verification link                   |
@@ -113,6 +114,8 @@ programmatic clients aren't supported (it's a personal app).
 | `GET` `PUT` `DELETE`          | `/api/v1/boss`                                      | Manage your single boss / approver                   |
 | `POST`                        | `/api/v1/boss/resend-consent`                       | Re-send the consent link to your boss                |
 | `GET`                         | `/ical/:token.ics`                                  | Public-facing iCal feed (token-authenticated)        |
+| `GET`                         | `/api/v1/share/:token/dashboard`                    | Public read-only dashboard payload (token IS auth)   |
+| `GET`                         | `/share/:token`                                     | Public read-only dashboard SPA page                  |
 | `GET`                         | `/verify-email/:token`                              | Email-verification redirect (link from inbox)        |
 | `GET` `POST`                  | `/boss/consent/:token`                              | Public consent page (boss has no AFK account)        |
 | `GET` `POST`                  | `/boss/approve/:token`                              | Public approve/reject page (boss has no AFK account) |

@@ -80,6 +80,7 @@ describe("data export", () => {
       expect(Array.isArray(body.categories)).toBe(true);
       expect(Array.isArray(body.allowances)).toBe(true);
       expect(Array.isArray(body.vacations)).toBe(true);
+      expect(Array.isArray(body.share_tokens)).toBe(true);
 
       const cats = body.categories as Array<{ name: string }>;
       const allowances = body.allowances as Array<{ year: number; days_allotted: number }>;

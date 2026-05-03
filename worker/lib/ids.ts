@@ -23,6 +23,17 @@ export function newICalToken(): string {
 }
 
 /**
+ * Token for read-only dashboard share links. 24 bytes -> 48 hex chars.
+ * Same shape as iCal tokens (192 bits of entropy is brute-force-proof) and
+ * the routing format-gate regex is shared.
+ */
+export function newShareToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * Token for boss consent + approval magic links. 32 bytes -> 64 hex chars.
  * These tokens are emailed to humans who paste-and-click; the entropy and
  * format match the email-verification token so the routing/format gates can

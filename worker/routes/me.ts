@@ -15,7 +15,12 @@ import {
   startEmailChange,
 } from "../lib/users.js";
 import { sendPlainEmail } from "../lib/mailgun.js";
-import { listAllAllowances, listAllVacations, listCategories } from "../lib/store.js";
+import {
+  listAllAllowances,
+  listAllVacations,
+  listCategories,
+  listShareTokens,
+} from "../lib/store.js";
 import { getBoss } from "../lib/boss-store.js";
 import { buildJsonExport, buildVacationsCsv, exportFilename } from "../lib/export.js";
 
@@ -105,11 +110,12 @@ r.patch("/timezone", async (c) => {
 // ---------------------------------------------------------------------------
 r.get("/export.json", async (c) => {
   const user = authedUser(c);
-  const [categories, allowances, vacations, boss] = await Promise.all([
+  const [categories, allowances, vacations, boss, shareTokens] = await Promise.all([
     listCategories(c.env.DB, user.id),
     listAllAllowances(c.env.DB, user.id),
     listAllVacations(c.env.DB, user.id),
     getBoss(c.env.DB, user.id),
+    listShareTokens(c.env.DB, user.id, c.env.APP_ORIGIN ?? ""),
   ]);
   const payload = buildJsonExport({
     user,
@@ -117,6 +123,7 @@ r.get("/export.json", async (c) => {
     allowances,
     vacations,
     boss,
+    shareTokens,
     appVersion: c.env.APP_VERSION ?? "dev",
   });
   return new Response(JSON.stringify(payload, null, 2), {

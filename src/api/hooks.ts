@@ -17,6 +17,8 @@ import type {
   CategorySummary,
   ICalToken,
   PasskeyMeta,
+  ShareScope,
+  ShareToken,
   User,
   Vacation,
 } from "@shared/types";
@@ -384,5 +386,34 @@ export function useDeleteBoss() {
   return useMutation({
     mutationFn: () => api(`${API_BASE}/boss`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["boss"] }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Share links (read-only dashboard URLs)
+// ---------------------------------------------------------------------------
+
+export function useShareTokens() {
+  return useQuery<ShareToken[]>({
+    queryKey: ["share-tokens"],
+    queryFn: () => api<ShareToken[]>(`${API_BASE}/share-tokens`),
+  });
+}
+
+export function useCreateShareToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { scope: ShareScope; label: string }) =>
+      api<ShareToken>(`${API_BASE}/share-tokens`, { method: "POST", json: body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["share-tokens"] }),
+  });
+}
+
+export function useDeleteShareToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api(`${API_BASE}/share-tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["share-tokens"] }),
   });
 }

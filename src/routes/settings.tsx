@@ -17,6 +17,7 @@ import {
   Download,
   UserCheck,
   User as UserIcon,
+  Share2,
 } from "lucide-react";
 import {
   useAllowances,
@@ -25,10 +26,12 @@ import {
   useClearEmail,
   useCreateCategory,
   useCreateICalToken,
+  useCreateShareToken,
   useDeleteBoss,
   useDeleteCategory,
   useDeleteICalToken,
   useDeletePasskey,
+  useDeleteShareToken,
   useICalTokens,
   usePasskeys,
   useRenamePasskey,
@@ -37,6 +40,7 @@ import {
   useSetDisplayName,
   useSetEmail,
   useSetTimezone,
+  useShareTokens,
   useUpdateCategory,
   useUpsertAllowance,
   useUpsertBoss,
@@ -69,6 +73,7 @@ function SettingsPage() {
       <BossSection />
       <PasskeysSection />
       <ICalSection />
+      <ShareLinksSection />
       <ExportSection />
     </div>
   );
@@ -1097,6 +1102,146 @@ function ICalSection() {
           New private
         </button>
       </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Share links — read-only dashboard URLs to hand out. Mirrors the iCal
+// section's UX (label, mint, copy URL, revoke). Two scopes:
+//   - current-year: locked to "today" in your timezone
+//   - all-years: visitor can pivot through years
+// ---------------------------------------------------------------------------
+function ShareLinksSection() {
+  const tokens = useShareTokens();
+  const create = useCreateShareToken();
+  const del = useDeleteShareToken();
+  const [copied, setCopied] = useState<string | null>(null);
+  const [label, setLabel] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  function copy(url: string) {
+    navigator.clipboard.writeText(url);
+    setCopied(url);
+    setTimeout(() => setCopied(null), 1500);
+  }
+
+  function mint(scope: "current-year" | "all-years") {
+    setError(null);
+    create.mutate(
+      { scope, label: label.trim() },
+      {
+        onSuccess: () => setLabel(""),
+        onError: (e) => setError((e as Error).message),
+      },
+    );
+  }
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <Share2 className="w-4 h-4" aria-hidden="true" /> Share links
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        Mint a read-only URL to send to your manager, spouse, or anyone else who wants visibility
+        into your time off. They see balances and bookings — not your private notes, not the
+        cancelled-and-restored history. Revoke any time.
+      </p>
+
+      <div className="flex flex-col gap-2">
+        {(tokens.data ?? []).map((t) => (
+          <div
+            key={t.id}
+            className="border-t border-subtle py-2 first:border-t-0 first:pt-0 flex flex-col gap-1"
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className="pill"
+                style={{
+                  backgroundColor: t.scope === "all-years" ? "#7c3aed" : "#0891b2",
+                }}
+                title={
+                  t.scope === "all-years"
+                    ? "Visitor can pivot through every year"
+                    : "Locked to whatever year is current when they open it"
+                }
+              >
+                {t.scope === "all-years" ? "All years" : "Current year"}
+              </span>
+              <span className="text-sm">{t.label || "(unnamed)"}</span>
+              <div className="flex-1" />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => copy(t.share_url)}
+                title={t.share_url}
+              >
+                {copied === t.share_url ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+                {copied === t.share_url ? "Copied" : "Copy URL"}
+              </button>
+              <button
+                type="button"
+                className="p-1 rounded hover:bg-hover text-[color:var(--color-danger)]"
+                onClick={() => {
+                  if (
+                    confirm("Revoke this share link? Whoever has it will start seeing a 404.")
+                  ) {
+                    del.mutate(t.id);
+                  }
+                }}
+                aria-label="Revoke share link"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="text-[11px] text-muted font-mono truncate">{t.share_url}</div>
+            {t.last_viewed_at && (
+              <div className="text-[11px] text-muted">
+                Last viewed {t.last_viewed_at.slice(0, 10)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 items-end">
+        <div className="flex-1 min-w-[160px]">
+          <label className="label">Link label</label>
+          <input
+            className="input"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. for Sarah, for HR"
+          />
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => mint("current-year")}
+          disabled={create.isPending}
+        >
+          <Plus className="w-4 h-4" />
+          New (current year)
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => mint("all-years")}
+          disabled={create.isPending}
+        >
+          <Plus className="w-4 h-4" />
+          New (all years)
+        </button>
+      </div>
+      {error && (
+        <div role="alert" className="text-sm text-[color:var(--color-danger)] mt-2">
+          {error}
+        </div>
+      )}
     </section>
   );
 }

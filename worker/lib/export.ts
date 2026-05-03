@@ -14,7 +14,14 @@
  * try to migrate off. See CLAUDE.md "Data export contract".
  */
 
-import type { Allowance, BossRelationship, Category, User, Vacation } from "../../shared/types.js";
+import type {
+  Allowance,
+  BossRelationship,
+  Category,
+  ShareToken,
+  User,
+  Vacation,
+} from "../../shared/types.js";
 import { vacationDayCost } from "../../shared/vacation-math.js";
 
 /** Schema version of the JSON dump — bump if the shape changes incompatibly. */
@@ -44,6 +51,14 @@ export interface JsonExport {
    * material. Approval history per vacation lives on `vacations.approval_state`.
    */
   boss: BossRelationship | null;
+  /**
+   * Read-only dashboard share links the user minted. The actual `token`
+   * value (and the resulting `share_url`) is NOT included — it's a
+   * credential and exposing it in a downloadable file is a leak risk. The
+   * user-authored metadata (label, scope, when, last viewed) is preserved
+   * so a migrating user has a record of which links existed.
+   */
+  share_tokens: Array<Pick<ShareToken, "id" | "scope" | "label" | "created_at" | "last_viewed_at">>;
 }
 
 export function buildJsonExport(input: {
@@ -52,6 +67,7 @@ export function buildJsonExport(input: {
   allowances: Allowance[];
   vacations: Vacation[];
   boss: BossRelationship | null;
+  shareTokens: ShareToken[];
   appVersion: string;
   now?: Date;
 }): JsonExport {
@@ -75,6 +91,13 @@ export function buildJsonExport(input: {
     allowances: input.allowances,
     vacations: input.vacations,
     boss: input.boss,
+    share_tokens: input.shareTokens.map((t) => ({
+      id: t.id,
+      scope: t.scope,
+      label: t.label,
+      created_at: t.created_at,
+      last_viewed_at: t.last_viewed_at,
+    })),
   };
 }
 

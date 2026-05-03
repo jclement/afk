@@ -32,6 +32,7 @@ import { feedApi, tokensApi } from "./routes/ical.js";
 import pdfRoutes from "./routes/pdf.js";
 import bossRoutes from "./routes/boss.js";
 import bossPublicRoutes from "./routes/boss-public.js";
+import { sharePublicApi, shareTokensApi } from "./routes/share.js";
 
 const app = new Hono<HonoVars>();
 
@@ -46,7 +47,9 @@ app.use(
     const redacted = message
       .replace(/\/boss\/(consent|approve)\/[0-9a-f]+/g, "/boss/$1/<redacted>")
       .replace(/\/verify-email\/[0-9a-f]+/g, "/verify-email/<redacted>")
-      .replace(/\/ical\/[0-9a-f]+/g, "/ical/<redacted>");
+      .replace(/\/ical\/[0-9a-f]+/g, "/ical/<redacted>")
+      .replace(/\/api\/v1\/share\/[0-9a-f]+/g, "/api/v1/share/<redacted>")
+      .replace(/\/share\/[0-9a-f]+/g, "/share/<redacted>");
     console.log(redacted, ...rest);
   }),
 );
@@ -121,6 +124,8 @@ app.route("/api/v1/me", meRoutes);
 app.route("/api/v1/ical-tokens", tokensApi);
 app.route("/api/v1/pdf", pdfRoutes);
 app.route("/api/v1/boss", bossRoutes);
+app.route("/api/v1/share-tokens", shareTokensApi);
+app.route("/api/v1/share", sharePublicApi);
 app.route("/ical", feedApi);
 app.route("/verify-email", emailVerifyRoutes);
 // Public boss flow (consent + approve). HTML pages, no auth — magic link

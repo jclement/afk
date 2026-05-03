@@ -110,6 +110,39 @@ export interface ICalToken {
   feed_url: string;
 }
 
+export type ShareScope = "current-year" | "all-years";
+
+export interface ShareToken {
+  id: string;
+  scope: ShareScope;
+  label: string;
+  created_at: string;
+  last_viewed_at: string | null;
+  /** Full URL the user copies to share. Built by the server. */
+  share_url: string;
+}
+
+/**
+ * Public-share dashboard payload. Mirrors `YearSummary` for a single year
+ * but stripped of anything sensitive: no `internal_desc`, no cancelled rows,
+ * no auth surface. The owner is identified by display_name only.
+ */
+export interface SharePublicPayload {
+  owner: { display_name: string; timezone: string };
+  scope: ShareScope;
+  /** Year currently being shown (server-resolved when `scope=current-year`). */
+  year: number;
+  /** Years that have any non-cancelled vacations — for the year picker on
+   *  `all-years` links. Empty array when scope is `current-year`. */
+  available_years: number[];
+  categories: CategorySummary[];
+  vacations: Array<
+    Omit<Vacation, "internal_desc" | "user_id" | "ical_sequence"> & {
+      category: Category | null;
+    }
+  >;
+}
+
 export interface PasskeyMeta {
   id: string;
   nickname: string | null;

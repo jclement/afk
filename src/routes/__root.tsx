@@ -48,8 +48,12 @@ function RootComponent() {
 
   const onAuthRoute = location.pathname === "/login" || location.pathname === "/setup";
   // Public routes — no auth, no auto-redirect away. /welcome is the marketing
-  // landing page; /about is the privacy/no-guarantees page.
-  const onPublicRoute = location.pathname === "/about" || location.pathname === "/welcome";
+  // landing page; /about is the privacy/no-guarantees page; /share/:token is
+  // the read-only dashboard handed out to managers/spouses (token IS the auth).
+  const onPublicRoute =
+    location.pathname === "/about" ||
+    location.pathname === "/welcome" ||
+    location.pathname.startsWith("/share/");
 
   useEffect(() => {
     if (!status.data || me.isLoading) return;

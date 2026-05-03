@@ -10,7 +10,15 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { newId } from "./ids.js";
 import { CATEGORY_PALETTE, nextCategoryColor } from "../../shared/colors.js";
-import type { Allowance, Category, ICalToken, PasskeyMeta, Vacation } from "../../shared/types.js";
+import type {
+  Allowance,
+  Category,
+  ICalToken,
+  PasskeyMeta,
+  ShareScope,
+  ShareToken,
+  Vacation,
+} from "../../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Categories
@@ -582,6 +590,110 @@ export async function touchICalTokenLastUsed(db: D1Database, tokenId: string): P
     .prepare(`UPDATE ical_tokens SET last_used_at = datetime('now') WHERE id = ?`)
     .bind(tokenId)
     .run();
+}
+
+// ---------------------------------------------------------------------------
+// Share tokens (read-only dashboard links)
+// ---------------------------------------------------------------------------
+
+interface ShareTokenRow {
+  id: string;
+  user_id: string;
+  token: string;
+  label: string;
+  scope: ShareScope;
+  created_at: string;
+  last_viewed_at: string | null;
+}
+
+export async function listShareTokens(
+  db: D1Database,
+  userId: string,
+  origin: string,
+): Promise<ShareToken[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, user_id, token, label, scope, created_at, last_viewed_at
+         FROM share_tokens WHERE user_id = ? ORDER BY created_at ASC`,
+    )
+    .bind(userId)
+    .all<ShareTokenRow>();
+  return (results ?? []).map((r) => ({
+    id: r.id,
+    scope: r.scope,
+    label: r.label,
+    created_at: r.created_at,
+    last_viewed_at: r.last_viewed_at,
+    share_url: `${origin}/share/${r.token}`,
+  }));
+}
+
+export async function createShareToken(
+  db: D1Database,
+  userId: string,
+  input: { scope: ShareScope; label: string; token: string },
+): Promise<{ id: string; token: string }> {
+  const id = newId();
+  await db
+    .prepare(
+      `INSERT INTO share_tokens (id, user_id, token, label, scope) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(id, userId, input.token, input.label, input.scope)
+    .run();
+  return { id, token: input.token };
+}
+
+export async function deleteShareToken(
+  db: D1Database,
+  userId: string,
+  id: string,
+): Promise<boolean> {
+  const res = await db
+    .prepare(`DELETE FROM share_tokens WHERE id = ? AND user_id = ?`)
+    .bind(id, userId)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
+/** Resolve a share token. Returns null on unknown tokens. */
+export async function findUserByShareToken(
+  db: D1Database,
+  token: string,
+): Promise<{ token_id: string; user_id: string; scope: ShareScope } | null> {
+  const row = await db
+    .prepare(`SELECT id AS token_id, user_id, scope FROM share_tokens WHERE token = ?`)
+    .bind(token)
+    .first<{ token_id: string; user_id: string; scope: ShareScope }>();
+  return row ?? null;
+}
+
+/** Stamp `last_viewed_at`. Called from the public route via waitUntil. */
+export async function touchShareTokenLastViewed(
+  db: D1Database,
+  tokenId: string,
+): Promise<void> {
+  await db
+    .prepare(`UPDATE share_tokens SET last_viewed_at = datetime('now') WHERE id = ?`)
+    .bind(tokenId)
+    .run();
+}
+
+/** Years (DESC) that have at least one non-cancelled vacation row. */
+export async function listVacationYears(db: D1Database, userId: string): Promise<number[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT DISTINCT CAST(substr(start_date, 1, 4) AS INTEGER) AS y
+         FROM vacations
+        WHERE user_id = ? AND cancelled_at IS NULL
+        UNION
+       SELECT DISTINCT CAST(substr(end_date, 1, 4) AS INTEGER) AS y
+         FROM vacations
+        WHERE user_id = ? AND cancelled_at IS NULL
+        ORDER BY y DESC`,
+    )
+    .bind(userId, userId)
+    .all<{ y: number }>();
+  return (results ?? []).map((r) => r.y);
 }
 
 // ---------------------------------------------------------------------------
