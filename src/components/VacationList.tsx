@@ -154,7 +154,7 @@ function CategoryPill({ category }: { category: Category | null }) {
 function ApprovalBadge({ state }: { state: import("@shared/types").ApprovalState | null }) {
   if (!state || state === "approved") return null;
   const bg = state === "pending" ? "var(--color-warning)" : "var(--color-danger)"; // rejected
-  const label = state === "pending" ? "Pending boss" : "Rejected";
+  const label = state === "pending" ? "Pending manager" : "Rejected";
   return (
     <span className="pill" style={{ backgroundColor: bg }} title={label}>
       {label}

@@ -101,7 +101,7 @@ const FEATURES: FeatureCard[] = [
   {
     icon: Rss,
     title: "iCal feeds for the people who care",
-    body: "Mint a private feed for your boss or a public one for the team. Subscribe in any calendar app — your time off shows up next to their meetings, no manual updates.",
+    body: "Mint a private feed for your manager or a public one for the team. Subscribe in any calendar app — your time off shows up next to their meetings, no manual updates.",
   },
   {
     icon: FileDown,

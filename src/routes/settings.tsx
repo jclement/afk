@@ -122,7 +122,7 @@ function BossSection() {
   return (
     <section className="card p-4">
       <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
-        <UserCheck className="w-4 h-4" aria-hidden="true" /> Boss / approver
+        <UserCheck className="w-4 h-4" aria-hidden="true" /> Manager / approver
         <span className="text-[10px] uppercase tracking-wide text-muted font-normal">Optional</span>
       </h2>
       <p className="text-xs text-subtle mb-3">
@@ -132,7 +132,7 @@ function BossSection() {
 
       {boss.isError && (
         <div role="alert" className="text-sm text-[color:var(--color-danger)]">
-          Couldn't load boss settings: {(boss.error as Error).message}
+          Couldn't load manager settings: {(boss.error as Error).message}
         </div>
       )}
 
@@ -145,7 +145,7 @@ function BossSection() {
             disabled={!userEmailOk}
             aria-disabled={!userEmailOk}
           >
-            <Plus className="w-4 h-4" aria-hidden="true" /> Add boss / approver
+            <Plus className="w-4 h-4" aria-hidden="true" /> Add manager / approver
           </button>
           {!userEmailOk && (
             <p className="text-[11px] text-muted mt-2">
@@ -162,7 +162,7 @@ function BossSection() {
           onRemove={() => {
             if (
               window.confirm(
-                "Remove this boss? Future vacations won't be sent to them. Already-sent calendar invites stay on their calendar.",
+                "Remove this manager? Future vacations won't be sent to them. Already-sent calendar invites stay on their calendar.",
               )
             ) {
               remove.mutate(undefined, {
@@ -197,7 +197,7 @@ function BossSection() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="boss@example.com"
+              placeholder="manager@example.com"
               required
               autoComplete="off"
               autoFocus
@@ -407,9 +407,9 @@ function DisplayNameSection() {
         <UserIcon className="w-4 h-4" aria-hidden="true" /> Your name
       </h2>
       <p className="text-xs text-subtle mb-3">
-        How you show up in calendar invites, the PDF header, and (if you set up a boss) your
-        manager's inbox. Your username (<code className="font-mono">@{me.data?.username}</code>) is
-        what you sign in with — separate.
+        How you show up in calendar invites, the PDF header, and (if you set up a manager) their
+        inbox. Your username (<code className="font-mono">@{me.data?.username}</code>) is what you
+        sign in with — separate.
       </p>
       <form onSubmit={save} className="flex flex-wrap gap-2 items-end">
         <div className="flex-1 min-w-[220px]">
