@@ -635,9 +635,7 @@ export async function createShareToken(
 ): Promise<{ id: string; token: string }> {
   const id = newId();
   await db
-    .prepare(
-      `INSERT INTO share_tokens (id, user_id, token, label, scope) VALUES (?, ?, ?, ?, ?)`,
-    )
+    .prepare(`INSERT INTO share_tokens (id, user_id, token, label, scope) VALUES (?, ?, ?, ?, ?)`)
     .bind(id, userId, input.token, input.label, input.scope)
     .run();
   return { id, token: input.token };
@@ -668,10 +666,7 @@ export async function findUserByShareToken(
 }
 
 /** Stamp `last_viewed_at`. Called from the public route via waitUntil. */
-export async function touchShareTokenLastViewed(
-  db: D1Database,
-  tokenId: string,
-): Promise<void> {
+export async function touchShareTokenLastViewed(db: D1Database, tokenId: string): Promise<void> {
   await db
     .prepare(`UPDATE share_tokens SET last_viewed_at = datetime('now') WHERE id = ?`)
     .bind(tokenId)

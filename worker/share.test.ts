@@ -158,9 +158,9 @@ describe("share public dashboard", () => {
       },
     });
     // Cancel the second one we just made (the most recent). Need its id:
-    const allV = (await (
-      await authedFetch(cookie, "/api/v1/vacations/summary/2026")
-    ).json()) as { data: { vacations: Array<{ id: string; public_desc: string }> } };
+    const allV = (await (await authedFetch(cookie, "/api/v1/vacations/summary/2026")).json()) as {
+      data: { vacations: Array<{ id: string; public_desc: string }> };
+    };
     const toCancel = allV.data.vacations.find((v) => v.public_desc === "ToCancel")!;
     await authedFetch(cookie, `/api/v1/vacations/${toCancel.id}/cancel`, { method: "POST" });
 

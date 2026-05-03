@@ -80,8 +80,11 @@ export async function sendCalendarInvite(
 }
 
 /**
- * Send a plain-text transactional email — no calendar attachment. Used for
- * the "click to verify your email" message.
+ * Send a transactional email — no calendar attachment. Used for the email
+ * verification flow and the boss consent / approval / decision messages.
+ *
+ * Pass `html` to attach an HTML alternative; recipient clients pick HTML
+ * when they support it and fall back to `text` otherwise.
  */
 export async function sendPlainEmail(
   env: Env,
@@ -89,6 +92,10 @@ export async function sendPlainEmail(
     to: string;
     subject: string;
     text: string;
+    /** Optional HTML alternative — when set, recipients render this body
+     *  instead of the plain text. Plain text is still required for clients
+     *  that don't render HTML and for spam-filter scoring. */
+    html?: string;
     /** Optional Reply-To header. Used by the boss flow so a boss replying
      *  to a notification reaches the user, not the no-reply Mailgun box. */
     replyTo?: string;
@@ -111,6 +118,9 @@ export async function sendPlainEmail(
   // CR/LF straight through to the outbound RFC822 message.
   form.append("subject", headerValue(opts.subject));
   form.append("text", opts.text);
+  if (opts.html) {
+    form.append("html", opts.html);
+  }
   if (opts.replyTo) {
     form.append("h:Reply-To", headerValue(opts.replyTo));
   }

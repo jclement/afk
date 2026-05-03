@@ -1187,9 +1187,7 @@ function ShareLinksSection() {
                 type="button"
                 className="p-1 rounded hover:bg-hover text-[color:var(--color-danger)]"
                 onClick={() => {
-                  if (
-                    confirm("Revoke this share link? Whoever has it will start seeing a 404.")
-                  ) {
+                  if (confirm("Revoke this share link? Whoever has it will start seeing a 404.")) {
                     del.mutate(t.id);
                   }
                 }}

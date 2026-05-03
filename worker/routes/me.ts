@@ -16,6 +16,15 @@ import {
 } from "../lib/users.js";
 import { sendPlainEmail } from "../lib/mailgun.js";
 import {
+  button,
+  escapeHtml,
+  lead,
+  linkFallback,
+  muted,
+  paragraph,
+  renderEmail,
+} from "../lib/email-template.js";
+import {
   listAllAllowances,
   listAllVacations,
   listCategories,
@@ -158,21 +167,40 @@ async function sendVerificationEmail(
   token: string,
 ): Promise<void> {
   const url = `${origin}/verify-email/${token}`;
+  const text = [
+    "Hi —",
+    "",
+    "Click the link below to verify this email for AFK so you can start receiving",
+    "calendar invites for your vacations:",
+    "",
+    url,
+    "",
+    "The link expires in 24 hours. If you didn't request this, ignore the email.",
+    "",
+    "— AFK",
+  ].join("\n");
+
+  const html = renderEmail({
+    preheader: "Confirm your email so AFK can send vacation invites to your calendar.",
+    heading: "Verify your email",
+    accent: "brand",
+    blocks: [
+      lead(
+        `Confirm <strong>${escapeHtml(email)}</strong> so AFK can send vacation invites straight to your calendar.`,
+      ),
+      button(url, "Verify email"),
+      linkFallback(url),
+      paragraph(`The link expires in 24 hours.`),
+      muted(`If you didn't request this, you can safely ignore this email.`),
+    ],
+    footer: `Sent by AFK · <a href="${escapeHtml(origin)}" style="color:inherit;">${escapeHtml(origin)}</a>`,
+  });
+
   await sendPlainEmail(env, {
     to: email,
     subject: "Verify your email for AFK",
-    text: [
-      "Hi —",
-      "",
-      "Click the link below to verify this email for AFK so you can start receiving",
-      "calendar invites for your vacations:",
-      "",
-      url,
-      "",
-      "The link expires in 24 hours. If you didn't request this, ignore the email.",
-      "",
-      "— AFK",
-    ].join("\n"),
+    text,
+    html,
   });
 }
 

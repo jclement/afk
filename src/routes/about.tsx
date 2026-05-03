@@ -50,14 +50,13 @@ function AboutPage() {
           <li>
             <strong className="text-heading">Requires approval</strong> — your booking enters as{" "}
             <em>pending</em> on your calendar. Your manager gets a one-click link to approve or
-            reject.
-            Calendar invites only fire on approval. Rejection cancels the booking and emails the
-            comment back to you.
+            reject. Calendar invites only fire on approval. Rejection cancels the booking and emails
+            the comment back to you.
           </li>
         </ul>
         <p>
-          The manager doesn't need an AFK account. They consent once via a verification email, and can
-          opt out by replying to any email and asking you to remove them. You can remove them
+          The manager doesn't need an AFK account. They consent once via a verification email, and
+          can opt out by replying to any email and asking you to remove them. You can remove them
           yourself at any time from Settings.
         </p>
         <p>

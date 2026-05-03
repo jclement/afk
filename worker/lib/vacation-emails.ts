@@ -16,6 +16,15 @@
 import type { Env } from "../types.js";
 import type { Category, User, Vacation } from "../../shared/types.js";
 import { describeVacation, vacationDayCost } from "../../shared/vacation-math.js";
+import {
+  badge,
+  divider,
+  lead,
+  metaTable,
+  muted,
+  notesBlock,
+  renderEmail,
+} from "./email-template.js";
 import { buildInviteIcs, inviteSummary } from "./ical-invite.js";
 import { renderMarkdown } from "./markdown.js";
 import { sendCalendarInvite } from "./mailgun.js";
@@ -62,7 +71,7 @@ export async function sendVacationLifecycleEmail(
 
   const subject = subjectFor(method, vacation, category);
   const text = plainBodyFor(method, vacation, category);
-  const html = htmlBodyFor(method, vacation, category);
+  const html = htmlBodyFor(method, vacation, category, status);
 
   try {
     await sendCalendarInvite(env, {
@@ -107,51 +116,69 @@ function plainBodyFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category |
   return lines.join("\n");
 }
 
-function htmlBodyFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category | null): string {
+function htmlBodyFor(
+  method: "PUBLISH" | "CANCEL",
+  v: Vacation,
+  cat: Category | null,
+  status: "CONFIRMED" | "CANCELLED" | "TENTATIVE",
+): string {
   const range = describeVacation(v);
   const days = vacationDayCost(v);
-  const lead =
-    method === "CANCEL"
-      ? `<p style="color:#b45309;font-weight:600;margin:0 0 12px 0">Cancelled.</p>`
-      : `<p style="margin:0 0 12px 0">Out of office.</p>`;
-  const tableRow = (k: string, v: string) =>
-    `<tr><td style="padding:2px 12px 2px 0;color:#6b7280;white-space:nowrap;vertical-align:top">${escapeHtml(k)}</td>` +
-    `<td style="padding:2px 0;color:#111827">${escapeHtml(v)}</td></tr>`;
-  const meta =
-    `<table style="border-collapse:collapse;font-size:14px;margin:0 0 16px 0">` +
-    tableRow("When", range) +
-    tableRow("Category", cat?.name ?? "—") +
-    tableRow("Days", String(days)) +
-    `</table>`;
-  const notesHtml = v.internal_desc?.trim()
-    ? `<div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-top:8px;font-size:14px;line-height:1.55;color:#1f2937">${renderMarkdown(v.internal_desc)}</div>`
-    : "";
-  const tail = `<p style="color:#9ca3af;font-size:12px;margin-top:16px">${
-    method === "CANCEL"
-      ? "Your calendar should remove this event automatically."
-      : "Your calendar should add (or update) this event automatically."
-  }</p>`;
-  return (
-    `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1f2937;font-size:14px;line-height:1.45">` +
-    lead +
-    meta +
-    notesHtml +
-    tail +
-    `</div>`
+  const isCancel = method === "CANCEL";
+  const isPending = status === "TENTATIVE";
+
+  const heading = isCancel
+    ? "Vacation cancelled"
+    : isPending
+      ? "Pending approval"
+      : "Out of office";
+  const accent = isCancel ? "warning" : isPending ? "warning" : "brand";
+  const status_badge = isCancel
+    ? badge("Cancelled", "warning")
+    : isPending
+      ? badge("Pending boss approval", "warning")
+      : badge("Confirmed", "success");
+
+  const blocks: string[] = [
+    lead(
+      isCancel
+        ? `This event has been removed from your calendar.`
+        : isPending
+          ? `Awaiting your boss's decision before this is confirmed on your calendar.`
+          : `Your time off is confirmed and on your calendar.`,
+    ),
+    `<div style="margin:0 0 16px 0;">${status_badge}</div>`,
+    metaTable([
+      ["When", range],
+      ["Category", cat?.name ?? "—"],
+      ["Days", String(days)],
+    ]),
+  ];
+
+  if (v.internal_desc?.trim()) {
+    blocks.push(divider());
+    blocks.push(notesBlock(renderMarkdown(v.internal_desc), "Notes"));
+  }
+
+  blocks.push(
+    muted(
+      isCancel
+        ? "Your calendar should remove this event automatically."
+        : "Your calendar should add (or update) this event automatically.",
+    ),
   );
+
+  return renderEmail({
+    preheader: `${heading} — ${range}`,
+    heading,
+    accent,
+    blocks,
+    footer: "Sent by AFK · your personal vacation tracker.",
+  });
 }
 
 function extractAddress(from: string): string {
   // "AFK <afk@mg.example.com>" → "afk@mg.example.com"
   const match = /<([^>]+)>/.exec(from);
   return match ? match[1]! : from;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

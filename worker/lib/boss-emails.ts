@@ -25,7 +25,21 @@ import type {
   VacationApproval,
 } from "../../shared/types.js";
 import { describeVacation, vacationDayCost } from "../../shared/vacation-math.js";
+import {
+  badge,
+  button,
+  divider,
+  escapeHtml,
+  lead,
+  linkFallback,
+  metaTable,
+  muted,
+  notesBlock,
+  paragraph,
+  renderEmail,
+} from "./email-template.js";
 import { buildInviteIcs, inviteSummary } from "./ical-invite.js";
+import { renderMarkdown } from "./markdown.js";
 import { sendCalendarInvite, sendPlainEmail } from "./mailgun.js";
 
 /**
@@ -64,10 +78,33 @@ export async function sendBossConsentEmail(opts: {
     "— AFK · " + appOrigin,
   ].join("\n");
 
+  const html = renderEmail({
+    preheader: `${user.display_name} wants to share their vacation calendar with you.`,
+    heading: `${user.display_name} wants to share their vacation calendar with you`,
+    accent: "brand",
+    blocks: [
+      lead(
+        `<strong>${escapeHtml(user.display_name)}</strong> (${escapeHtml(user.email ?? "no email on file")}) is using <strong>AFK</strong> — a personal vacation tracker — and would like to share their schedule with you.`,
+      ),
+      `<div style="margin:0 0 16px 0;">${
+        boss.mode === "notify" ? badge("Notify mode", "brand") : badge("Approval mode", "brand")
+      }</div>`,
+      paragraph(escapeHtml(modeBlurb)),
+      paragraph(`AFK has no account for you. Just click below to consent:`),
+      button(url, boss.mode === "notify" ? "Accept notifications" : "Become approver"),
+      linkFallback(url),
+      muted(
+        `If you don't want to receive these, ignore this email — nothing happens until you click.`,
+      ),
+    ],
+    footer: `Sent by AFK · <a href="${escapeHtml(appOrigin)}" style="color:inherit;">${escapeHtml(appOrigin)}</a><br>You'll only get further messages from AFK if you click above.`,
+  });
+
   await sendPlainEmail(env, {
     to: boss.boss_email,
     subject: `${user.display_name} wants to share vacation with you on AFK`,
     text,
+    html,
     replyTo: user.email ?? undefined,
   });
 }
@@ -137,11 +174,53 @@ export async function sendBossNotifyInvite(opts: {
     revokeFooter(appOrigin, boss),
   ].join("\n");
 
+  const isCancel = method === "CANCEL";
+  const isPending = status === "TENTATIVE";
+  const heading = isCancel
+    ? `${user.display_name} cancelled time off`
+    : isPending
+      ? `${user.display_name} requested time off`
+      : `${user.display_name} booked time off`;
+  const status_badge = isCancel
+    ? badge("Cancelled", "warning")
+    : isPending
+      ? badge("Pending your approval", "warning")
+      : badge("Confirmed", "success");
+
+  const html = renderEmail({
+    preheader: `${user.display_name} — ${verb}: ${summary}`,
+    heading,
+    accent: isCancel ? "warning" : isPending ? "warning" : "brand",
+    blocks: [
+      lead(
+        isCancel
+          ? `Their calendar event has been removed.`
+          : isPending
+            ? `They've asked for time off; check your inbox for the approval link.`
+            : `Their time off has been added to your shared calendar.`,
+      ),
+      `<div style="margin:0 0 16px 0;">${status_badge}</div>`,
+      metaTable([
+        ["When", range],
+        ["Category", category?.name ?? "—"],
+        ["Days", String(days)],
+        ["From", `${user.display_name}${user.email ? ` <${user.email}>` : ""}`],
+      ]),
+      muted(
+        isCancel
+          ? "Your calendar should remove this event automatically."
+          : "Your calendar should add (or update) this event automatically.",
+      ),
+    ],
+    footer: revokeFooterHtml(appOrigin, user),
+  });
+
   await sendCalendarInvite(env, {
     to: boss.boss_email,
     replyTo: user.email ?? undefined,
     subject,
     text,
+    html,
     ics,
     method,
   });
@@ -195,10 +274,44 @@ export async function sendBossApprovalRequest(opts: {
   // Restore deliberate blank lines (filter dropped them above; rebuild with
   // a small marker that allows empty gaps).
   const subject = `${user.display_name} wants ${range} off`;
+
+  const usedFmt = fmtDays(balance.used_days);
+  const totalFmt = fmtDays(balance.total_days);
+  const remainingFmt = fmtDays(balance.remaining_days);
+  const balanceLabel = `${category?.name ?? "Balance"} after this request`;
+  const balanceValue = `${usedFmt} / ${totalFmt} used · ${remainingFmt} remaining`;
+
+  const metaRows: Array<[string, string]> = [
+    ["When", range],
+    ["Category", category?.name ?? "—"],
+    ["Days", String(days)],
+  ];
+  if (vacation.public_desc.trim()) {
+    metaRows.push(["Description", vacation.public_desc.trim()]);
+  }
+  metaRows.push([balanceLabel, balanceValue]);
+
+  const html = renderEmail({
+    preheader: `${user.display_name} is requesting ${range} off — approve or reject.`,
+    heading: `${user.display_name} wants time off`,
+    accent: "brand",
+    blocks: [
+      lead(
+        `<strong>${escapeHtml(user.display_name)}</strong> (${escapeHtml(user.email ?? "no email on file")}) is requesting time off and is waiting on your call.`,
+      ),
+      metaTable(metaRows),
+      button(url, "Review request"),
+      linkFallback(url),
+      muted(`Reject asks for a short reason; approve just confirms.`),
+    ],
+    footer: revokeFooterHtml(appOrigin, user),
+  });
+
   await sendPlainEmail(env, {
     to: boss.boss_email,
     subject,
     text,
+    html,
     replyTo: user.email ?? undefined,
   });
 }
@@ -240,10 +353,56 @@ export async function sendDecisionReceiptToUser(opts: {
     "",
     `— AFK · ${appOrigin}`,
   ].join("\n");
+
+  const isApproved = decision === "approved";
+  const blocks: string[] = [
+    lead(
+      isApproved
+        ? `Good news — your time off is confirmed.`
+        : `Your request was rejected. The booking has been cancelled.`,
+    ),
+    `<div style="margin:0 0 16px 0;">${
+      isApproved ? badge("Approved", "success") : badge("Rejected", "danger")
+    }</div>`,
+    metaTable([
+      ["Decided by", boss.boss_email],
+      ["When", range],
+      ["Category", category?.name ?? "—"],
+    ]),
+  ];
+
+  if (!isApproved) {
+    blocks.push(divider());
+    if (comment?.trim()) {
+      blocks.push(notesBlock(renderMarkdown(comment), "Reason"));
+    } else {
+      blocks.push(paragraph(`<em style="color:#6b7280;">No reason provided.</em>`));
+    }
+  }
+
+  blocks.push(
+    muted(
+      isApproved
+        ? "Your calendar should update automatically — the event is now confirmed. Have a good break."
+        : "Edit and resubmit if you'd like to try different dates.",
+    ),
+  );
+
+  const html = renderEmail({
+    preheader: isApproved
+      ? `Approved: ${inviteSummary(category, vacation)}`
+      : `Rejected: ${inviteSummary(category, vacation)}`,
+    heading: isApproved ? "Your vacation was approved" : "Your vacation was rejected",
+    accent: isApproved ? "success" : "danger",
+    blocks,
+    footer: `Sent by AFK · <a href="${escapeHtml(appOrigin)}" style="color:inherit;">${escapeHtml(appOrigin)}</a>`,
+  });
+
   await sendPlainEmail(env, {
     to: user.email,
     subject: `${verb === "approved" ? "Approved" : "Rejected"}: ${inviteSummary(category, vacation)}`,
     text,
+    html,
   });
 }
 
@@ -254,6 +413,16 @@ function revokeFooter(appOrigin: string, _boss: BossRelationship): string {
   // footer copy is now truthful. Could be upgraded to a one-click
   // unsubscribe later (RFC 8058 List-Unsubscribe).
   return `— Sent by AFK · ${appOrigin}\nDon't want these? Reply to this email — it goes back to the sender.`;
+}
+
+function revokeFooterHtml(appOrigin: string, user: User): string {
+  // HTML twin of revokeFooter. Reply-To is set to the user's verified
+  // address, so a reply reaches the human who set up AFK, not Mailgun.
+  const safeOrigin = escapeHtml(appOrigin);
+  const replyHint = user.email
+    ? `Don't want these? Reply to this email — it goes to <strong>${escapeHtml(user.email)}</strong>.`
+    : `Don't want these? Reply to this email — it goes back to the sender.`;
+  return `Sent by AFK · <a href="${safeOrigin}" style="color:inherit;">${safeOrigin}</a><br>${replyHint}`;
 }
 
 function extractAddress(from: string): string {

@@ -246,6 +246,13 @@ The user adds their email in Settings, gets a verification link via Mailgun (24h
 invite to themselves with a stable UID (`{vacation.id}@afk`) and a monotonically-increasing
 `SEQUENCE`. The same UID + sequence pattern keeps Outlook/Apple/Google in sync.
 
+All transactional emails (verification, vacation lifecycle invites, boss consent / approval
+request / decision receipt) ship a polished HTML alternative built from
+`worker/lib/email-template.ts`. Inline-styled, table-based layout — Gmail, Outlook, and Apple
+Mail strip `<style>` blocks, so the helpers (`renderEmail`, `metaTable`, `button`,
+`notesBlock`, `badge`) emit only inline-styled HTML. Plain-text bodies are still sent as the
+fallback alternative for spam-filter scoring and bare clients.
+
 ## Data export
 
 `GET /api/v1/me/export.json` returns a complete dump of every user-owned table (profile,
@@ -314,7 +321,7 @@ URL token IS the auth.
 
 Two scopes are stored on the link itself, not toggled by the visitor:
 
-- **`current-year`** — the visitor always sees the year that's current in the *owner's*
+- **`current-year`** — the visitor always sees the year that's current in the _owner's_
   timezone. A `?year=` query is ignored. Locks the experience to "what's relevant right now."
 - **`all-years`** — the visitor can pivot through any year that has activity. Server returns
   an `available_years` list to populate a year picker.
@@ -337,9 +344,9 @@ the visitor already read.
 
 Schema (`migrations/0007_share_tokens.sql`):
 
-| Table          | Purpose                          | Notable columns                                                          |
-| -------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| `share_tokens` | Read-only dashboard share links  | `token`, `scope`, `label`, `last_viewed_at` (FK to `users`, ON DELETE CASCADE) |
+| Table          | Purpose                         | Notable columns                                                                |
+| -------------- | ------------------------------- | ------------------------------------------------------------------------------ |
+| `share_tokens` | Read-only dashboard share links | `token`, `scope`, `label`, `last_viewed_at` (FK to `users`, ON DELETE CASCADE) |
 
 ## Daily cron
 
