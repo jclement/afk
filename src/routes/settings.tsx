@@ -1196,7 +1196,6 @@ function ShareLinksSection() {
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
-            <div className="text-[11px] text-muted font-mono truncate">{t.share_url}</div>
             {t.last_viewed_at && (
               <div className="text-[11px] text-muted">
                 Last viewed {t.last_viewed_at.slice(0, 10)}
