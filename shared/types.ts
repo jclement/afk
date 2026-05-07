@@ -123,9 +123,23 @@ export interface ShareToken {
 }
 
 /**
+ * Sanitised allowance for the public share payload. Drops `notes` (private
+ * free-text the owner uses for accounting comments — "re-negotiated PTO with
+ * HR Q3"), `id` and `user_id` (internal). The recipient only needs the
+ * numeric inputs to render the dashboard widgets.
+ */
+export type PublicAllowance = Omit<Allowance, "id" | "user_id" | "notes">;
+
+/** CategorySummary as exposed to public-share visitors — allowance scrubbed. */
+export interface PublicCategorySummary extends Omit<CategorySummary, "allowance"> {
+  allowance: PublicAllowance;
+}
+
+/**
  * Public-share dashboard payload. Mirrors `YearSummary` for a single year
  * but stripped of anything sensitive: no `internal_desc`, no cancelled rows,
- * no auth surface. The owner is identified by display_name only.
+ * no auth surface, no allowance notes. The owner is identified by
+ * display_name only.
  */
 export interface SharePublicPayload {
   owner: { display_name: string; timezone: string };
@@ -135,7 +149,7 @@ export interface SharePublicPayload {
   /** Years that have any non-cancelled vacations — for the year picker on
    *  `all-years` links. Empty array when scope is `current-year`. */
   available_years: number[];
-  categories: CategorySummary[];
+  categories: PublicCategorySummary[];
   vacations: Array<
     Omit<Vacation, "internal_desc" | "user_id" | "ical_sequence"> & {
       category: Category | null;

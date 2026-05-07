@@ -81,6 +81,10 @@ describe("data export", () => {
       expect(Array.isArray(body.allowances)).toBe(true);
       expect(Array.isArray(body.vacations)).toBe(true);
       expect(Array.isArray(body.share_tokens)).toBe(true);
+      expect(Array.isArray(body.vacation_approvals)).toBe(true);
+      // `boss` field is present in the response shape (null when no
+      // relationship). Detailed boss-export coverage lives in boss.test.ts.
+      expect("boss" in body).toBe(true);
 
       const cats = body.categories as Array<{ name: string }>;
       const allowances = body.allowances as Array<{ year: number; days_allotted: number }>;
@@ -128,7 +132,7 @@ describe("data export", () => {
       const lines = text.trim().split("\r\n");
       expect(lines).toHaveLength(2); // header + one row
       expect(lines[0]).toBe(
-        "start_date,end_date,days,partial_amount,category_name,category_color,category_accrues,public_desc,internal_desc,cancelled_at,created_at,updated_at,id",
+        "start_date,end_date,days,partial_amount,category_name,category_color,category_accrues,public_desc,internal_desc,cancelled_at,approval_state,created_at,updated_at,id",
       );
       // Computed days field present (5 business days Mon-Fri).
       expect(lines[1]).toContain("2026-05-04,2026-05-08,5,");

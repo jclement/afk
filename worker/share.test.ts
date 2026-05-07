@@ -191,6 +191,16 @@ describe("share public dashboard", () => {
     const raw = JSON.stringify(body);
     expect(raw).not.toContain("Birthday party for the kid");
     expect(raw).not.toContain("internal_desc");
+    // Allowance must be projected — no private fields, no internal IDs.
+    const cat0 = (
+      body.data.categories[0] as unknown as {
+        allowance: Record<string, unknown>;
+      }
+    ).allowance;
+    expect("notes" in cat0).toBe(false);
+    expect("id" in cat0).toBe(false);
+    expect("user_id" in cat0).toBe(false);
+    expect(cat0.days_allotted).toBe(20);
   });
 
   it("current-year scope ignores ?year query and resolves to owner's now", async () => {

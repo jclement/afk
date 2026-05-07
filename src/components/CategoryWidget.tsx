@@ -5,9 +5,16 @@
  */
 
 import { AlertTriangle } from "lucide-react";
-import type { CategorySummary } from "@shared/types";
+import type { CategorySummary, PublicCategorySummary } from "@shared/types";
 
-export function CategoryWidget({ summary }: { summary: CategorySummary }) {
+export function CategoryWidget({
+  summary,
+}: {
+  // Accept either the full owner-side summary or the public-share variant.
+  // The widget never reads private fields off `allowance` (only the usage
+  // numbers and category metadata), so the union is safe.
+  summary: CategorySummary | PublicCategorySummary;
+}) {
   const { category, used_days, total_days, available_days, over_accrual_days } = summary;
   const pct = total_days > 0 ? Math.min(100, (used_days / total_days) * 100) : 0;
   const availPct = total_days > 0 ? Math.min(100, (available_days / total_days) * 100) : 0;

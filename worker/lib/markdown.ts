@@ -7,6 +7,12 @@
  * handlers, javascript: URLs) so the email passes their HTML sanitisers
  * cleanly instead of getting mangled or quarantined.
  *
+ * **DO NOT** use this for content authored by an unauthenticated third party
+ * (e.g. the manager's reject comment on the boss flow). Markdown link syntax
+ * `[label](url)` lets a hostile author ship the user a phishing link under
+ * arbitrary anchor text. For untrusted content, use
+ * `escapeHtmlMultiline()` from `email-template.ts` instead.
+ *
  * After rendering, every block element gets an inline style attribute. Email
  * clients (Gmail, Outlook, Fastmail) routinely strip <style> blocks and even
  * default list/heading CSS, so without inline styles a `<ul>` shows up as

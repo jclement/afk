@@ -19,6 +19,9 @@ import {
   decideApproval,
   findApprovalByToken,
   findBossByConsentToken,
+  findBossByUnsubscribeToken,
+  getBossUnsubscribeToken,
+  revokeBoss,
   setVacationApprovalState,
 } from "../lib/boss-store.js";
 import {
@@ -30,8 +33,18 @@ import {
   cancelVacation,
 } from "../lib/store.js";
 import { getUser } from "../lib/users.js";
-import { BOSS_PAGE_HEADERS, renderApprovalPage, renderConsentPage } from "../lib/boss-pages.js";
-import { sendBossNotifyInvite, sendDecisionReceiptToUser } from "../lib/boss-emails.js";
+import {
+  BOSS_PAGE_HEADERS,
+  renderApprovalPage,
+  renderConsentPage,
+  renderUnsubscribePage,
+} from "../lib/boss-pages.js";
+import {
+  sendBossNotifyInvite,
+  sendConsentAcceptedToUser,
+  sendConsentRevokedToUser,
+  sendDecisionReceiptToUser,
+} from "../lib/boss-emails.js";
 import { sendVacationLifecycleEmail } from "../lib/vacation-emails.js";
 import {
   categoryUsage,
@@ -48,6 +61,23 @@ const TOKEN_RE = /^[0-9a-f]{64}$/;
  * use this so we can't accidentally drop the cache headers. */
 function bossHtml(html: string, status: number = 200): Response {
   return new Response(html, { headers: BOSS_PAGE_HEADERS, status });
+}
+
+/**
+ * CSRF guard for boss POST endpoints. The token in the URL is the auth, but
+ * the URL leaks in many ways (link-preview bots, corporate URL-rewriters,
+ * server logs at the boss's mail gateway, accidental forwards). Without
+ * Origin-pinning, a manager who clicks an attacker's page could POST a
+ * cross-site form whose action is `/boss/approve/<leaked-token>`.
+ *
+ * Behaviour: when the Origin header is present, it must match the request
+ * origin. When absent, allow — Outlook desktop / corporate gateways and
+ * RFC 8058 one-click unsubscribe POSTs sometimes send no Origin.
+ */
+function checkOrigin(c: import("hono").Context<HonoVars>): boolean {
+  const sent = c.req.header("origin");
+  if (!sent) return true;
+  return sent === new URL(c.req.url).origin;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,11 +105,25 @@ r.get("/consent/:token", async (c) => {
 r.post("/consent/:token", async (c) => {
   const token = c.req.param("token");
   const origin = new URL(c.req.url).origin;
+  if (!checkOrigin(c)) return new Response("Forbidden", { status: 403 });
   if (!TOKEN_RE.test(token)) return notFoundConsent(c, origin);
   const boss = await acceptBossConsent(c.env.DB, token);
   if (!boss) return notFoundConsent(c, origin);
   const user = await getUser(c.env.DB, boss.user_id);
   if (!user) return notFoundConsent(c, origin);
+
+  // Tell the user their manager just consented. acceptBossConsent only
+  // returns a non-null boss on the first successful click (the token is
+  // cleared in the same UPDATE), so a refresh / second tab can't double-fire.
+  c.executionCtx.waitUntil(
+    sendConsentAcceptedToUser({
+      env: c.env,
+      appOrigin: origin,
+      user,
+      boss,
+    }).catch((e) => console.error("[boss] consent-accepted notify failed", e)),
+  );
+
   return bossHtml(
     renderConsentPage({
       user,
@@ -87,6 +131,77 @@ r.post("/consent/:token", async (c) => {
       appOrigin: origin,
       formAction: `/boss/consent/${token}`,
       confirmation: "accepted",
+    }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Unsubscribe flow (one-click + RFC 8058 List-Unsubscribe-Post)
+// ---------------------------------------------------------------------------
+//
+// GET  /boss/unsubscribe/:token — show a confirmation form (humans clicking
+//      the footer link). GET intentionally doesn't mutate so a link
+//      preview / prefetch can't burn the token.
+// POST /boss/unsubscribe/:token — actually revoke. Same endpoint serves
+//      both the form's POST and Gmail/Outlook's RFC 8058 one-click POST
+//      (`List-Unsubscribe=One-Click` body); we don't care which form
+//      arrives, only that it's a POST.
+
+r.get("/unsubscribe/:token", async (c) => {
+  const token = c.req.param("token");
+  const origin = new URL(c.req.url).origin;
+  if (!TOKEN_RE.test(token)) return notFoundUnsubscribe(c, origin);
+  const boss = await findBossByUnsubscribeToken(c.env.DB, token);
+  if (!boss) return notFoundUnsubscribe(c, origin);
+  const user = await getUser(c.env.DB, boss.user_id);
+  if (!user) return notFoundUnsubscribe(c, origin);
+  return bossHtml(
+    renderUnsubscribePage({
+      user,
+      boss,
+      appOrigin: origin,
+      formAction: `/boss/unsubscribe/${token}`,
+      // If they're already revoked, surface that instead of the form so a
+      // second click from an old email doesn't pretend to do work.
+      confirmation: boss.consent_status === "revoked" ? "already-revoked" : undefined,
+    }),
+  );
+});
+
+r.post("/unsubscribe/:token", async (c) => {
+  const token = c.req.param("token");
+  const origin = new URL(c.req.url).origin;
+  if (!checkOrigin(c)) return new Response("Forbidden", { status: 403 });
+  if (!TOKEN_RE.test(token)) return notFoundUnsubscribe(c, origin);
+  const boss = await findBossByUnsubscribeToken(c.env.DB, token);
+  if (!boss) return notFoundUnsubscribe(c, origin);
+  const user = await getUser(c.env.DB, boss.user_id);
+  if (!user) return notFoundUnsubscribe(c, origin);
+
+  const result = await revokeBoss(c.env.DB, boss.id);
+
+  // Notify the USER once — only on the first revoke (changed === true).
+  // A second click from another email tab is a no-op: the row is already
+  // revoked and we don't want to spam the user with duplicate "your
+  // manager unsubscribed" notifications.
+  if (result.changed) {
+    c.executionCtx.waitUntil(
+      sendConsentRevokedToUser({
+        env: c.env,
+        appOrigin: origin,
+        user,
+        boss: { ...boss, consent_status: "revoked", revoked_at: new Date().toISOString() },
+      }).catch((e) => console.error("[boss] revoke-notify failed", e)),
+    );
+  }
+
+  return bossHtml(
+    renderUnsubscribePage({
+      user,
+      boss: { ...boss, consent_status: "revoked", revoked_at: new Date().toISOString() },
+      appOrigin: origin,
+      formAction: `/boss/unsubscribe/${token}`,
+      confirmation: result.changed ? "revoked" : "already-revoked",
     }),
   );
 });
@@ -113,6 +228,7 @@ r.get("/approve/:token", async (c) => {
 r.post("/approve/:token", async (c) => {
   const token = c.req.param("token");
   const origin = new URL(c.req.url).origin;
+  if (!checkOrigin(c)) return new Response("Forbidden", { status: 403 });
   if (!TOKEN_RE.test(token)) return notFoundApprove(c, origin);
   const ctx = await loadApprovalContext(c.env.DB, token);
   if (!ctx) return notFoundApprove(c, origin);
@@ -223,15 +339,28 @@ r.post("/approve/:token", async (c) => {
         decision === "approved" ? "updated" : "cancelled",
       ).catch((e) => console.error("[boss] user-side iCal send failed", e)),
 
-      sendBossNotifyInvite({
-        env: c.env,
-        appOrigin: origin,
-        user: ctx.user,
-        boss: ctx.boss,
-        vacation: updatedVacation,
-        category: ctx.category,
-        method: decision === "approved" ? "PUBLISH" : "CANCEL",
-      }).catch((e) => console.error("[boss] boss-side iCal send failed", e)),
+      (async () => {
+        // Skip the boss-side iCal fan-out if the relationship was revoked
+        // between the GET (showing the form) and the POST. The
+        // findApprovalByToken filter blocks this from reaching here in
+        // practice, but defence-in-depth: never send to a revoked address.
+        if (ctx.boss.consent_status !== "consented") return;
+        // Re-read the unsubscribe token from the relationship so the boss
+        // copy carries the same one-click footer/header as every other
+        // boss-bound message.
+        const unsubscribeToken = await getBossUnsubscribeToken(c.env.DB, ctx.user.id);
+        if (!unsubscribeToken) return;
+        await sendBossNotifyInvite({
+          env: c.env,
+          appOrigin: origin,
+          user: ctx.user,
+          boss: ctx.boss,
+          vacation: updatedVacation,
+          category: ctx.category,
+          method: decision === "approved" ? "PUBLISH" : "CANCEL",
+          unsubscribeToken,
+        });
+      })().catch((e) => console.error("[boss] boss-side iCal send failed", e)),
     ]).then(() => undefined),
   );
 
@@ -308,6 +437,19 @@ function notFoundConsent(_c: import("hono").Context<HonoVars>, appOrigin: string
       appOrigin,
       formAction: "#",
       confirmation: "expired",
+    }),
+    404,
+  );
+}
+
+function notFoundUnsubscribe(_c: import("hono").Context<HonoVars>, appOrigin: string) {
+  return bossHtml(
+    renderUnsubscribePage({
+      user: emptyUser(),
+      boss: emptyBoss(),
+      appOrigin,
+      formAction: "#",
+      confirmation: "unknown",
     }),
     404,
   );

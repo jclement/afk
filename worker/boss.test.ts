@@ -29,6 +29,23 @@ interface SentMail {
 
 const sent: SentMail[] = [];
 
+/**
+ * Decode an RFC 2047 "encoded-word" header value back to its original UTF-8
+ * string. The mailgun client base64-wraps any header containing non-ASCII
+ * bytes (so "Alice — OOO" ships as `=?UTF-8?B?...?=`); the test capture
+ * undoes that so subject assertions can compare against human-readable text.
+ * Only handles the single-word `=?UTF-8?B?...?=` shape we actually emit —
+ * not a full RFC 2047 decoder.
+ */
+function decodeMimeHeader(s: string): string {
+  return s.replace(/=\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=/gi, (_m, b64: string) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  });
+}
+
 beforeEach(async () => {
   await applyMigrations();
   // Mailgun won't actually fire (MAILGUN_API_KEY isn't set in tests). To
@@ -49,7 +66,8 @@ beforeEach(async () => {
         // MIME upload — pull the message blob and parse Subject + To from it.
         const blob = fd.get("message") as Blob;
         const mime = await blob.text();
-        const subject = /^Subject:\s*(.+)$/m.exec(mime)?.[1]?.trim() ?? "";
+        const rawSubject = /^Subject:\s*(.+)$/m.exec(mime)?.[1]?.trim() ?? "";
+        const subject = decodeMimeHeader(rawSubject);
         const to = String(fd.get("to") ?? "");
         sent.push({ to, subject, text: mime });
       } else {
@@ -170,6 +188,16 @@ async function fetchTokenFromDb(userId: string): Promise<string> {
   return row.consent_token;
 }
 
+async function fetchUnsubscribeTokenFromDb(userId: string): Promise<string> {
+  const row = await env.DB.prepare(
+    `SELECT unsubscribe_token FROM boss_relationships WHERE user_id = ?`,
+  )
+    .bind(userId)
+    .first<{ unsubscribe_token: string }>();
+  if (!row?.unsubscribe_token) throw new Error("no unsubscribe token");
+  return row.unsubscribe_token;
+}
+
 /**
  * Pull the text/calendar part out of a captured Mailgun MIME body and
  * base64-decode it. The mailgun mock stores the whole MIME blob as `text`
@@ -210,6 +238,7 @@ describe("boss consent flow", () => {
       json: { boss_email: "g@e.com", mode: "notify" },
     });
     const token = await fetchTokenFromDb(userId);
+    sent.length = 0; // ignore the consent-request email from PUT above
     const accept = await unauthedFetch(`/boss/consent/${token}`, { method: "POST" });
     expect(accept.status).toBe(200);
     expect(await accept.text()).toContain("You're in");
@@ -221,6 +250,14 @@ describe("boss consent flow", () => {
     const get = await authedFetch(cookie, "/api/v1/boss");
     const body = (await get.json()) as { data: { consent_status: string } };
     expect(body.data.consent_status).toBe("consented");
+
+    // Notify the USER (not the manager) that consent was accepted. Fires
+    // exactly once even though we POSTed twice — token-burn is the gate.
+    await new Promise((r) => setTimeout(r, 10));
+    const userMsgs = sent.filter((m) => m.to === "alice@example.com");
+    expect(userMsgs).toHaveLength(1);
+    expect(userMsgs[0]!.subject.toLowerCase()).toContain("notification recipient");
+    expect(userMsgs[0]!.subject).toContain("g@e.com");
   });
 
   it("404s on bogus / malformed tokens (format gate)", async () => {
@@ -232,6 +269,121 @@ describe("boss consent flow", () => {
         )
       ).status,
     ).toBe(404);
+  });
+});
+
+describe("boss unsubscribe flow", () => {
+  async function arrangeConsented(): Promise<{
+    cookie: string;
+    userId: string;
+    unsubscribeToken: string;
+  }> {
+    const { cookie, userId } = await setupUserWithEmail();
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", mode: "notify" },
+    });
+    const consentToken = await fetchTokenFromDb(userId);
+    await unauthedFetch(`/boss/consent/${consentToken}`, { method: "POST" });
+    return {
+      cookie,
+      userId,
+      unsubscribeToken: await fetchUnsubscribeTokenFromDb(userId),
+    };
+  }
+
+  it("upsertBoss mints an unsubscribe_token + emails carry it as List-Unsubscribe", async () => {
+    const { cookie, userId } = await arrangeConsented();
+    const categoryId = await setupCategoryAndAllowance(cookie);
+    sent.length = 0;
+    await authedFetch(cookie, "/api/v1/vacations", {
+      method: "POST",
+      json: {
+        category_id: categoryId,
+        start_date: "2026-05-04",
+        end_date: "2026-05-04",
+        partial_amount: null,
+        public_desc: "OOO",
+        internal_desc: "",
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    const bossInvite = sent.find((m) => m.to === "g@e.com");
+    expect(bossInvite).toBeDefined();
+    const expectedToken = await fetchUnsubscribeTokenFromDb(userId);
+    // The MIME body carries the List-Unsubscribe header and the matching
+    // visible footer URL.
+    expect(bossInvite!.text).toContain(`/boss/unsubscribe/${expectedToken}`);
+    expect(bossInvite!.text).toMatch(/List-Unsubscribe:\s*<[^>]+>/i);
+    expect(bossInvite!.text).toMatch(/List-Unsubscribe-Post:\s*List-Unsubscribe=One-Click/i);
+  });
+
+  it("GET renders the confirm form; POST revokes + emails the user once", async () => {
+    const { unsubscribeToken } = await arrangeConsented();
+    sent.length = 0;
+    const form = await unauthedFetch(`/boss/unsubscribe/${unsubscribeToken}`);
+    expect(form.status).toBe(200);
+    expect(await form.text()).toContain("Stop receiving emails");
+
+    // GET must not mutate — the relationship is still consented.
+    const stillConsented = await env.DB.prepare(
+      `SELECT consent_status, revoked_at FROM (SELECT CASE WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN consented_at IS NOT NULL THEN 'consented' ELSE 'pending' END AS consent_status, revoked_at FROM boss_relationships WHERE unsubscribe_token = ?)`,
+    )
+      .bind(unsubscribeToken)
+      .first<{ consent_status: string; revoked_at: string | null }>();
+    expect(stillConsented?.consent_status).toBe("consented");
+
+    // POST does the work.
+    const action = await unauthedFetch(`/boss/unsubscribe/${unsubscribeToken}`, { method: "POST" });
+    expect(action.status).toBe(200);
+    expect(await action.text()).toContain("Unsubscribed");
+
+    await new Promise((r) => setTimeout(r, 10));
+    const userMsgs = sent.filter((m) => m.to === "alice@example.com");
+    expect(userMsgs).toHaveLength(1);
+    expect(userMsgs[0]!.subject).toContain("g@e.com");
+    expect(userMsgs[0]!.subject.toLowerCase()).toContain("unsubscribed");
+
+    // Replay POST is a no-op — already-revoked rendering, no second email.
+    const replay = await unauthedFetch(`/boss/unsubscribe/${unsubscribeToken}`, { method: "POST" });
+    expect(replay.status).toBe(200);
+    expect(await replay.text()).toContain("already unsubscribed");
+    await new Promise((r) => setTimeout(r, 10));
+    const after = sent.filter((m) => m.to === "alice@example.com");
+    expect(after).toHaveLength(1);
+  });
+
+  it("RFC 8058 one-click POST works with no body", async () => {
+    // Gmail/Outlook send a bare POST with `List-Unsubscribe=One-Click` body.
+    // Our handler doesn't actually inspect the body — the URL is the auth.
+    const { unsubscribeToken } = await arrangeConsented();
+    const res = await unauthedFetch(`/boss/unsubscribe/${unsubscribeToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "List-Unsubscribe=One-Click",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("404s on bogus / malformed tokens", async () => {
+    expect((await unauthedFetch(`/boss/unsubscribe/abc`)).status).toBe(404);
+    expect(
+      (await unauthedFetch(`/boss/unsubscribe/${"00".repeat(32)}`, { method: "POST" })).status,
+    ).toBe(404);
+  });
+
+  it("rotates unsubscribe_token when the email changes (old URL stops working)", async () => {
+    const { cookie, userId, unsubscribeToken: original } = await arrangeConsented();
+    // Change the email — same row, but consent + unsubscribe token rotated.
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "different@e.com", mode: "notify" },
+    });
+    const rotated = await fetchUnsubscribeTokenFromDb(userId);
+    expect(rotated).not.toBe(original);
+    // Old URL is dead.
+    const dead = await unauthedFetch(`/boss/unsubscribe/${original}`, { method: "POST" });
+    expect(dead.status).toBe(404);
   });
 });
 

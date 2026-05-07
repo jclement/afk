@@ -53,6 +53,50 @@ export function renderConsentPage(opts: {
   });
 }
 
+/**
+ * One-click unsubscribe landing page. The GET handler renders this with no
+ * `confirmation`; the manager clicks the button → POST → we render the
+ * "you're out" confirmation. RFC 8058 clients (Gmail/Outlook) skip the GET
+ * entirely and POST directly — they get a 200 with this same HTML, but
+ * they ignore the body and just show their native "unsubscribed" toast.
+ */
+export function renderUnsubscribePage(opts: {
+  user: User;
+  boss: BossRelationship;
+  appOrigin: string;
+  formAction: string;
+  /** When set, render a confirmation card instead of the form. */
+  confirmation?: "revoked" | "already-revoked" | "expired" | "unknown";
+}): string {
+  const { user, boss, appOrigin, formAction, confirmation } = opts;
+  const card = confirmation
+    ? confirmationCard(
+        confirmation === "expired" || confirmation === "unknown"
+          ? confirmation
+          : confirmation === "already-revoked"
+            ? "already-revoked"
+            : "revoked",
+        user,
+      )
+    : `
+      <h1>Stop receiving emails from AFK?</h1>
+      <p class="lead">You'll no longer receive ${escapeHtml(user.display_name)}'s vacation notifications at <code>${escapeHtml(boss.boss_email)}</code>.</p>
+
+      <p class="quiet">Already-delivered calendar invites stay on your calendar — your client manages those locally. ${escapeHtml(user.display_name)} can re-add you later, which would send a fresh consent email.</p>
+
+      <form method="POST" action="${escapeHtml(formAction)}">
+        <button type="submit" class="primary">Yes, unsubscribe me</button>
+      </form>
+
+      <p class="quiet">Changed your mind? Just close this tab.</p>
+    `;
+  return shell({
+    title: "Unsubscribe — AFK",
+    body: card,
+    appOrigin,
+  });
+}
+
 export function renderApprovalPage(opts: {
   user: User;
   boss: BossRelationship;
@@ -150,7 +194,14 @@ export function renderApprovalPage(opts: {
 }
 
 function confirmationCard(
-  kind: "accepted" | "approved" | "rejected" | "expired" | "unknown",
+  kind:
+    | "accepted"
+    | "approved"
+    | "rejected"
+    | "expired"
+    | "unknown"
+    | "revoked"
+    | "already-revoked",
   user: User,
 ): string {
   const blurb: Record<
@@ -159,7 +210,7 @@ function confirmationCard(
   > = {
     accepted: {
       title: "You're in.",
-      body: `Future vacation updates from ${escapeHtml(user.display_name)} will land in your inbox. To opt out later, just reply to any email and ask them to remove you.`,
+      body: `Future vacation updates from ${escapeHtml(user.display_name)} will land in your inbox. To opt out later, click the unsubscribe link in any email.`,
       tone: "good",
     },
     approved: {
@@ -181,6 +232,16 @@ function confirmationCard(
       title: "This link isn't valid.",
       body: "It may have already been used, expired, or been mistyped.",
       tone: "bad",
+    },
+    revoked: {
+      title: "Unsubscribed.",
+      body: `You're done — no more AFK emails about ${escapeHtml(user.display_name)}'s vacations. Already-delivered calendar invites stay on your calendar; your client manages those locally.`,
+      tone: "good",
+    },
+    "already-revoked": {
+      title: "You're already unsubscribed.",
+      body: `Nothing to do. You won't receive further AFK emails about ${escapeHtml(user.display_name)}'s vacations.`,
+      tone: "neutral",
     },
   };
   const it = blurb[kind];

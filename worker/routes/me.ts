@@ -30,7 +30,7 @@ import {
   listCategories,
   listShareTokens,
 } from "../lib/store.js";
-import { getBoss } from "../lib/boss-store.js";
+import { getBoss, listAllApprovalsForUser } from "../lib/boss-store.js";
 import { buildJsonExport, buildVacationsCsv, exportFilename } from "../lib/export.js";
 
 const r = new Hono<HonoVars>();
@@ -119,19 +119,22 @@ r.patch("/timezone", async (c) => {
 // ---------------------------------------------------------------------------
 r.get("/export.json", async (c) => {
   const user = authedUser(c);
-  const [categories, allowances, vacations, boss, shareTokens] = await Promise.all([
-    listCategories(c.env.DB, user.id),
-    listAllAllowances(c.env.DB, user.id),
-    listAllVacations(c.env.DB, user.id),
-    getBoss(c.env.DB, user.id),
-    listShareTokens(c.env.DB, user.id, c.env.APP_ORIGIN ?? ""),
-  ]);
+  const [categories, allowances, vacations, boss, vacationApprovals, shareTokens] =
+    await Promise.all([
+      listCategories(c.env.DB, user.id),
+      listAllAllowances(c.env.DB, user.id),
+      listAllVacations(c.env.DB, user.id),
+      getBoss(c.env.DB, user.id),
+      listAllApprovalsForUser(c.env.DB, user.id),
+      listShareTokens(c.env.DB, user.id, c.env.APP_ORIGIN ?? ""),
+    ]);
   const payload = buildJsonExport({
     user,
     categories,
     allowances,
     vacations,
     boss,
+    vacationApprovals,
     shareTokens,
     appVersion: c.env.APP_VERSION ?? "dev",
   });

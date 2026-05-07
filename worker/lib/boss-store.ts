@@ -37,6 +37,10 @@ interface BossRow {
   consent_token_expires_at: string | null;
   consented_at: string | null;
   revoked_at: string | null;
+  /** Long-lived one-click unsubscribe token. Per relationship, rotated on
+   *  email/mode change. NULL on fresh DBs that haven't gone through the
+   *  0008 migration's backfill (defence-in-depth — should never occur). */
+  unsubscribe_token: string | null;
   created_at: string;
 }
 
@@ -63,7 +67,8 @@ function deriveConsentStatus(r: {
 }
 
 const SELECT_BOSS = `SELECT id, user_id, boss_email, mode,
-  consent_token, consent_token_expires_at, consented_at, revoked_at, created_at
+  consent_token, consent_token_expires_at, consented_at, revoked_at,
+  unsubscribe_token, created_at
   FROM boss_relationships`;
 
 /** Get the (single) boss relationship for a user, or null. */
@@ -110,8 +115,11 @@ export async function upsertBoss(
     return { boss: rowToBoss(existing), consent_token: null };
   }
 
-  // Email or mode changed → reset consent and mint a new token.
+  // Email or mode changed → reset consent and mint a new token. Rotate the
+  // unsubscribe token too so a previously-known address (the manager being
+  // replaced) can't revoke the freshly-pointed relationship.
   const token = newBossToken();
+  const unsubToken = newBossToken();
   const expires = new Date(Date.now() + CONSENT_TTL_MS).toISOString();
 
   if (existing) {
@@ -149,19 +157,21 @@ export async function upsertBoss(
         `UPDATE boss_relationships
             SET boss_email = ?, mode = ?,
                 consent_token = ?, consent_token_expires_at = ?,
-                consented_at = NULL, revoked_at = NULL
+                consented_at = NULL, revoked_at = NULL,
+                unsubscribe_token = ?
           WHERE id = ?`,
       )
-      .bind(input.boss_email, input.mode, token, expires, existing.id)
+      .bind(input.boss_email, input.mode, token, expires, unsubToken, existing.id)
       .run();
   } else {
     await db
       .prepare(
         `INSERT INTO boss_relationships
-           (id, user_id, boss_email, mode, consent_token, consent_token_expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           (id, user_id, boss_email, mode, consent_token, consent_token_expires_at,
+            unsubscribe_token)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(newId(), userId, input.boss_email, input.mode, token, expires)
+      .bind(newId(), userId, input.boss_email, input.mode, token, expires, unsubToken)
       .run();
   }
 
@@ -241,21 +251,106 @@ export async function acceptBossConsent(
 }
 
 /**
- * Revoke a relationship. Used by the boss via the unsubscribe footer in
+ * Revoke a relationship. Used by the manager via the unsubscribe link in
  * every email, and by the user via DELETE. Sets revoked_at; future emails
- * skip this row. The user can re-add (will mint a new token).
+ * skip this row. The user can re-add (will mint a new consent token).
+ *
+ * The unsubscribe_token is **kept** so the manager can revoke again later
+ * if the user re-adds them with the same email — same row, same token, no
+ * mystery URL changes mid-conversation.
+ *
+ * Returns `{ changed }`: true on the first revoke, false if the row was
+ * already revoked. Lets the caller skip a duplicate user-facing email when
+ * a manager double-clicks the unsubscribe button.
  */
-export async function revokeBoss(db: D1Database, relationshipId: string): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE boss_relationships
-          SET revoked_at = datetime('now'),
-              consent_token = NULL,
-              consent_token_expires_at = NULL
-        WHERE id = ?`,
-    )
+export async function revokeBoss(
+  db: D1Database,
+  relationshipId: string,
+): Promise<{ changed: boolean; userId: string | null }> {
+  // First read the user_id so the caller can null pending approval_state on
+  // the user's vacations (the boss is gone — those vacations have nobody to
+  // decide them). We do this BEFORE the UPDATE because we want it regardless
+  // of whether `changed` is true (a re-click is no-op for the relationship
+  // but we still expose the user_id for the caller's bookkeeping).
+  const existing = await db
+    .prepare(`SELECT user_id FROM boss_relationships WHERE id = ?`)
     .bind(relationshipId)
-    .run();
+    .first<{ user_id: string }>();
+
+  // Burn every in-flight decision token tied to this relationship. Without
+  // this, a manager who unsubscribes can still click any unexpired
+  // approval-request link in their inbox and force a decision — defeats the
+  // whole point of unsubscribe.
+  const stmts = [
+    db
+      .prepare(
+        `UPDATE vacation_approvals
+            SET decision_token = NULL,
+                decision_token_expires_at = NULL
+          WHERE boss_relationship_id = ?
+            AND decision_token IS NOT NULL`,
+      )
+      .bind(relationshipId),
+    db
+      .prepare(
+        `UPDATE boss_relationships
+            SET revoked_at = datetime('now'),
+                consent_token = NULL,
+                consent_token_expires_at = NULL
+          WHERE id = ? AND revoked_at IS NULL`,
+      )
+      .bind(relationshipId),
+  ];
+  const results = await db.batch<unknown>(stmts);
+  const changed = (results[1]?.meta?.changes ?? 0) > 0;
+
+  // Null pending approval_state on the user's vacations (mirrors deleteBoss).
+  // The decision tokens are already burned above; this is just the
+  // denormalised dashboard/iCal state catching up. Bumping ical_sequence
+  // tells calendar clients the event reverted from TENTATIVE to no-status.
+  if (changed && existing) {
+    await db
+      .prepare(
+        `UPDATE vacations
+            SET approval_state = NULL,
+                ical_sequence = ical_sequence + 1,
+                updated_at = datetime('now')
+          WHERE user_id = ? AND approval_state = 'pending'`,
+      )
+      .bind(existing.user_id)
+      .run();
+  }
+
+  return { changed, userId: existing?.user_id ?? null };
+}
+
+/**
+ * Look up a relationship by its long-lived unsubscribe token. Returns null
+ * on unknown tokens. Used by the public `/boss/unsubscribe/:token` route.
+ */
+export async function findBossByUnsubscribeToken(
+  db: D1Database,
+  token: string,
+): Promise<BossRelationship | null> {
+  const row = await db
+    .prepare(`${SELECT_BOSS} WHERE unsubscribe_token = ?`)
+    .bind(token)
+    .first<BossRow>();
+  return row ? rowToBoss(row) : null;
+}
+
+/**
+ * Read the unsubscribe token for a user's relationship. Email senders use
+ * this to build the per-message `…/boss/unsubscribe/<token>` URL. Returns
+ * null when no relationship exists or the row predates the 0008 migration's
+ * backfill (defence-in-depth — should never occur).
+ */
+export async function getBossUnsubscribeToken(
+  db: D1Database,
+  userId: string,
+): Promise<string | null> {
+  const row = await getBossRowByUser(db, userId);
+  return row?.unsubscribe_token ?? null;
 }
 
 /**
@@ -387,7 +482,9 @@ export async function findApprovalByToken(
          FROM vacation_approvals a
          JOIN vacations v          ON v.id = a.vacation_id
          JOIN boss_relationships b ON b.id = a.boss_relationship_id
-        WHERE a.decision_token = ?`,
+        WHERE a.decision_token = ?
+          AND b.revoked_at IS NULL
+          AND b.consented_at IS NOT NULL`,
     )
     .bind(token)
     .first<{
@@ -514,6 +611,46 @@ export async function clearPendingDecisionTokens(
     )
     .bind(vacationId)
     .run();
+}
+
+/**
+ * List every vacation_approval row that belongs to a user (joining through
+ * the vacations table on user_id). Returns the public, secret-free
+ * `VacationApproval` shape — token fields are intentionally NOT selected so
+ * they can't accidentally leak into the JSON export.
+ */
+export async function listAllApprovalsForUser(
+  db: D1Database,
+  userId: string,
+): Promise<VacationApproval[]> {
+  const rs = await db
+    .prepare(
+      `SELECT a.id, a.vacation_id, a.boss_relationship_id, a.state,
+              a.decided_at, a.decision_comment, a.created_at
+         FROM vacation_approvals a
+         JOIN vacations v ON v.id = a.vacation_id
+        WHERE v.user_id = ?
+        ORDER BY a.created_at ASC`,
+    )
+    .bind(userId)
+    .all<{
+      id: string;
+      vacation_id: string;
+      boss_relationship_id: string;
+      state: ApprovalState;
+      decided_at: string | null;
+      decision_comment: string | null;
+      created_at: string;
+    }>();
+  return (rs.results ?? []).map((r) => ({
+    id: r.id,
+    vacation_id: r.vacation_id,
+    boss_relationship_id: r.boss_relationship_id,
+    state: r.state,
+    decided_at: r.decided_at,
+    decision_comment: r.decision_comment,
+    created_at: r.created_at,
+  }));
 }
 
 /** Set the denormalised approval_state on the vacations row. */

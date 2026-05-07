@@ -47,7 +47,7 @@ import {
 } from "../../shared/vacation-math.js";
 import type {
   Allowance,
-  CategorySummary,
+  PublicCategorySummary,
   ShareScope,
   SharePublicPayload,
 } from "../../shared/types.js";
@@ -188,7 +188,7 @@ sharePublicApi.get("/:token/dashboard", async (c) => {
 
   const visible = vacationsInYear(year, vacations);
   const asOf = new Date();
-  const summaries: CategorySummary[] = cats
+  const summaries: PublicCategorySummary[] = cats
     .filter((c2) => !c2.archived || visible.some((v) => v.category_id === c2.id))
     .map((cat) => {
       const allowance = byCategory.get(cat.id)!;
@@ -200,7 +200,19 @@ sharePublicApi.get("/:token/dashboard", async (c) => {
         year,
         user.timezone,
       );
-      return { category: cat, allowance, ...usage };
+      // Strip private allowance fields: `notes` is the owner's accounting
+      // free-text (e.g. "re-negotiated PTO with HR Q3"), and `id`/`user_id`
+      // are internal. The recipient only needs the numeric inputs.
+      return {
+        category: cat,
+        allowance: {
+          category_id: allowance.category_id,
+          year: allowance.year,
+          days_allotted: allowance.days_allotted,
+          days_carryover: allowance.days_carryover,
+        },
+        ...usage,
+      };
     });
 
   // For the all-years picker, include every year that has activity even if

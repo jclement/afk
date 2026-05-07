@@ -30,6 +30,7 @@ import {
   button,
   divider,
   escapeHtml,
+  escapeHtmlMultiline,
   lead,
   linkFallback,
   metaTable,
@@ -39,7 +40,6 @@ import {
   renderEmail,
 } from "./email-template.js";
 import { buildInviteIcs, inviteSummary } from "./ical-invite.js";
-import { renderMarkdown } from "./markdown.js";
 import { sendCalendarInvite, sendPlainEmail } from "./mailgun.js";
 
 /**
@@ -125,8 +125,12 @@ export async function sendBossNotifyInvite(opts: {
   /** Override status. Defaults to CONFIRMED on PUBLISH (boss only sees
    * approved bookings in approval mode; notify mode never has pending). */
   status?: "CONFIRMED" | "TENTATIVE" | "CANCELLED";
+  /** Per-relationship unsubscribe token — embedded in the footer + RFC 8058
+   *  List-Unsubscribe header so the manager can opt out in one click. */
+  unsubscribeToken: string;
 }): Promise<void> {
-  const { env, appOrigin, user, boss, vacation, category, method, status } = opts;
+  const { env, appOrigin, user, boss, vacation, category, method, status, unsubscribeToken } = opts;
+  const unsubUrl = `${appOrigin}/boss/unsubscribe/${unsubscribeToken}`;
   const organizerEmail = env.MAILGUN_FROM
     ? extractAddress(env.MAILGUN_FROM)
     : env.MAILGUN_DOMAIN
@@ -171,7 +175,7 @@ export async function sendBossNotifyInvite(opts: {
       ? "Your calendar should remove this event automatically."
       : "Your calendar should add (or update) this event automatically.",
     "",
-    revokeFooter(appOrigin, boss),
+    revokeFooter(appOrigin, unsubUrl),
   ].join("\n");
 
   const isCancel = method === "CANCEL";
@@ -212,7 +216,7 @@ export async function sendBossNotifyInvite(opts: {
           : "Your calendar should add (or update) this event automatically.",
       ),
     ],
-    footer: revokeFooterHtml(appOrigin, user),
+    footer: revokeFooterHtml(appOrigin, unsubUrl, user),
   });
 
   await sendCalendarInvite(env, {
@@ -223,6 +227,7 @@ export async function sendBossNotifyInvite(opts: {
     html,
     ics,
     method,
+    listUnsubscribe: unsubUrl,
   });
 }
 
@@ -242,9 +247,23 @@ export async function sendBossApprovalRequest(opts: {
   decisionToken: string;
   /** Pre-decision balance preview — what the boss will see on the page. */
   balance: { used_days: number; total_days: number; remaining_days: number };
+  /** Per-relationship unsubscribe token — embedded in the footer + RFC 8058
+   *  List-Unsubscribe header so the manager can opt out in one click. */
+  unsubscribeToken: string;
 }): Promise<void> {
-  const { env, appOrigin, user, boss, vacation, category, decisionToken, balance } = opts;
+  const {
+    env,
+    appOrigin,
+    user,
+    boss,
+    vacation,
+    category,
+    decisionToken,
+    balance,
+    unsubscribeToken,
+  } = opts;
   const url = `${appOrigin}/boss/approve/${decisionToken}`;
+  const unsubUrl = `${appOrigin}/boss/unsubscribe/${unsubscribeToken}`;
   const range = describeVacation(vacation);
   const days = vacationDayCost(vacation);
 
@@ -266,7 +285,7 @@ export async function sendBossApprovalRequest(opts: {
     "",
     "Reject requires a short reason; approve just confirms.",
     "",
-    revokeFooter(appOrigin, boss),
+    revokeFooter(appOrigin, unsubUrl),
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -304,7 +323,7 @@ export async function sendBossApprovalRequest(opts: {
       linkFallback(url),
       muted(`Reject asks for a short reason; approve just confirms.`),
     ],
-    footer: revokeFooterHtml(appOrigin, user),
+    footer: revokeFooterHtml(appOrigin, unsubUrl, user),
   });
 
   await sendPlainEmail(env, {
@@ -313,6 +332,7 @@ export async function sendBossApprovalRequest(opts: {
     text,
     html,
     replyTo: user.email ?? undefined,
+    listUnsubscribe: unsubUrl,
   });
 }
 
@@ -374,7 +394,10 @@ export async function sendDecisionReceiptToUser(opts: {
   if (!isApproved) {
     blocks.push(divider());
     if (comment?.trim()) {
-      blocks.push(notesBlock(renderMarkdown(comment), "Reason"));
+      // Escaped plain text only — never markdown. The manager is an
+      // unauthenticated party and `[label](url)` would let them ship the
+      // user a phishing link under arbitrary anchor text.
+      blocks.push(notesBlock(escapeHtmlMultiline(comment), "Reason"));
     } else {
       blocks.push(paragraph(`<em style="color:#6b7280;">No reason provided.</em>`));
     }
@@ -406,23 +429,154 @@ export async function sendDecisionReceiptToUser(opts: {
   });
 }
 
-function revokeFooter(appOrigin: string, _boss: BossRelationship): string {
-  // Reply-To on every boss email is set to the user's verified address (see
-  // sendBossConsentEmail / sendBossNotifyInvite / sendBossApprovalRequest).
-  // So a Reply lands on a real human, not the no-reply Mailgun box, and the
-  // footer copy is now truthful. Could be upgraded to a one-click
-  // unsubscribe later (RFC 8058 List-Unsubscribe).
-  return `— Sent by AFK · ${appOrigin}\nDon't want these? Reply to this email — it goes back to the sender.`;
+/**
+ * Tell the USER that their manager just clicked the consent link. Fires
+ * once, when `acceptBossConsent` flips a relationship from pending →
+ * consented (also re-fires when an already-revoked relationship is
+ * re-consented, which is the same "you're set up" semantic from the
+ * user's POV).
+ *
+ * No iCal attachment — this is just a state-change ping. The actual
+ * vacation invites get sent separately whenever the user books something.
+ */
+export async function sendConsentAcceptedToUser(opts: {
+  env: Env;
+  appOrigin: string;
+  user: User;
+  boss: BossRelationship;
+}): Promise<void> {
+  const { env, appOrigin, user, boss } = opts;
+  if (!user.email) return; // user has no email on file — silently skip
+  const modeLine =
+    boss.mode === "notify"
+      ? "From now on, every vacation you book gets a calendar invite copied to them automatically."
+      : "From now on, every vacation you book waits as 'pending' on your calendar until they approve or reject — they'll get a one-click link for each request.";
+
+  const text = [
+    `Hi ${user.display_name},`,
+    "",
+    `${boss.boss_email} accepted your invitation to be your ${boss.mode === "approval" ? "approver" : "notification recipient"} on AFK.`,
+    "",
+    modeLine,
+    "",
+    "You can change the mode or remove them anytime from Settings.",
+    "",
+    `— AFK · ${appOrigin}`,
+  ].join("\n");
+
+  const html = renderEmail({
+    preheader: `${boss.boss_email} is now connected to your AFK calendar.`,
+    heading: "You're connected",
+    accent: "success",
+    blocks: [
+      lead(
+        `<strong>${escapeHtml(boss.boss_email)}</strong> accepted your invitation to be your ${boss.mode === "approval" ? "approver" : "notification recipient"} on AFK.`,
+      ),
+      `<div style="margin:0 0 16px 0;">${
+        boss.mode === "notify" ? badge("Notify mode", "brand") : badge("Approval mode", "brand")
+      }</div>`,
+      paragraph(escapeHtml(modeLine)),
+      muted(`You can change the mode or remove them anytime from Settings.`),
+    ],
+    footer: `Sent by AFK · <a href="${escapeHtml(appOrigin)}" style="color:inherit;">${escapeHtml(appOrigin)}</a>`,
+  });
+
+  await sendPlainEmail(env, {
+    to: user.email,
+    subject: `${boss.boss_email} is now your ${boss.mode === "approval" ? "approver" : "notification recipient"} on AFK`,
+    text,
+    html,
+  });
 }
 
-function revokeFooterHtml(appOrigin: string, user: User): string {
-  // HTML twin of revokeFooter. Reply-To is set to the user's verified
-  // address, so a reply reaches the human who set up AFK, not Mailgun.
+/**
+ * Tell the USER that their manager just clicked the unsubscribe link.
+ * Fires once, on the first revoke (the store layer's `changed` flag is the
+ * gate). Plain copy + the "you can re-add them or pick someone else"
+ * pointer back to Settings — we don't want the user to silently start
+ * sending unmonitored vacation emails for weeks.
+ */
+export async function sendConsentRevokedToUser(opts: {
+  env: Env;
+  appOrigin: string;
+  user: User;
+  boss: BossRelationship;
+}): Promise<void> {
+  const { env, appOrigin, user, boss } = opts;
+  if (!user.email) return; // user has no email on file — silently skip
+  const settingsUrl = `${appOrigin}/settings`;
+
+  const text = [
+    `Hi ${user.display_name},`,
+    "",
+    `${boss.boss_email} clicked the unsubscribe link and is no longer receiving your AFK emails.`,
+    "",
+    boss.mode === "approval"
+      ? "Heads up: you were in approval mode, so any pending vacation requests now have nobody to decide them. Future bookings won't go to anyone until you set up a new approver."
+      : "Future vacations you book won't be copied to them. Their already-delivered calendar invites stay on their calendar; AFK won't send any more.",
+    "",
+    `Add a different person — or re-invite the same one — at ${settingsUrl}.`,
+    "",
+    `— AFK · ${appOrigin}`,
+  ].join("\n");
+
+  const html = renderEmail({
+    preheader: `${boss.boss_email} unsubscribed from your AFK notifications.`,
+    heading: "Your manager unsubscribed",
+    accent: "warning",
+    blocks: [
+      lead(
+        `<strong>${escapeHtml(boss.boss_email)}</strong> clicked the unsubscribe link in one of your AFK emails. They won't receive further notifications.`,
+      ),
+      `<div style="margin:0 0 16px 0;">${badge("Unsubscribed", "warning")}</div>`,
+      paragraph(
+        boss.mode === "approval"
+          ? `<strong>You were in approval mode</strong> — pending vacation requests now have nobody to decide them. Future bookings won't go to anyone until you set up a new approver.`
+          : `Future vacations you book won't be copied to them. Their already-delivered calendar invites stay on their calendar; AFK won't send any more.`,
+      ),
+      button(settingsUrl, "Manage in Settings"),
+      muted(`You can re-invite the same person or pick someone different.`),
+    ],
+    footer: `Sent by AFK · <a href="${escapeHtml(appOrigin)}" style="color:inherit;">${escapeHtml(appOrigin)}</a>`,
+  });
+
+  await sendPlainEmail(env, {
+    to: user.email,
+    subject: `${boss.boss_email} unsubscribed from your AFK notifications`,
+    text,
+    html,
+  });
+}
+
+/**
+ * Plain-text footer with the per-relationship unsubscribe URL. Same URL is
+ * also emitted as a `List-Unsubscribe` header (RFC 8058) so Gmail/Outlook
+ * surface their native one-click unsubscribe button. The visible link is
+ * the fallback for clients that don't render List-Unsubscribe.
+ */
+function revokeFooter(appOrigin: string, unsubscribeUrl: string): string {
+  return [
+    `— Sent by AFK · ${appOrigin}`,
+    `Don't want these? Stop them with one click: ${unsubscribeUrl}`,
+  ].join("\n");
+}
+
+/**
+ * HTML twin of revokeFooter. Includes both the unsubscribe link and a quiet
+ * "reply also works" hint so the manager has more than one way out — handy
+ * if the link gets mangled in their corporate email gateway.
+ */
+function revokeFooterHtml(appOrigin: string, unsubscribeUrl: string, user: User): string {
   const safeOrigin = escapeHtml(appOrigin);
+  const safeUnsub = escapeHtml(unsubscribeUrl);
   const replyHint = user.email
-    ? `Don't want these? Reply to this email — it goes to <strong>${escapeHtml(user.email)}</strong>.`
-    : `Don't want these? Reply to this email — it goes back to the sender.`;
-  return `Sent by AFK · <a href="${safeOrigin}" style="color:inherit;">${safeOrigin}</a><br>${replyHint}`;
+    ? `Or reply — it goes to <strong>${escapeHtml(user.email)}</strong>.`
+    : `Or reply — it goes back to the sender.`;
+  return (
+    `Sent by AFK · <a href="${safeOrigin}" style="color:inherit;">${safeOrigin}</a>` +
+    `<br>Don't want these? <a href="${safeUnsub}" style="color:inherit;text-decoration:underline;">Unsubscribe in one click</a>. ` +
+    replyHint
+  );
 }
 
 function extractAddress(from: string): string {

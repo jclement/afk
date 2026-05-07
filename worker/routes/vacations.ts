@@ -29,6 +29,7 @@ import {
   clearPendingDecisionTokens,
   createOrResetApproval,
   getBoss,
+  getBossUnsubscribeToken,
   setVacationApprovalState,
 } from "../lib/boss-store.js";
 import { sendBossApprovalRequest, sendBossNotifyInvite } from "../lib/boss-emails.js";
@@ -261,16 +262,20 @@ r.patch("/:id", async (c) => {
             try {
               const allCats = await listCategories(c.env.DB, user.id);
               const cat = allCats.find((cc) => cc.id === priorApprovedVacation.category_id) ?? null;
-              await sendBossNotifyInvite({
-                env: c.env,
-                appOrigin: new URL(c.req.url).origin,
-                user,
-                boss,
-                vacation: { ...priorApprovedVacation, ical_sequence: toMail.ical_sequence },
-                category: cat,
-                method: "PUBLISH",
-                status: "TENTATIVE",
-              });
+              const unsubscribeToken = await getBossUnsubscribeToken(c.env.DB, user.id);
+              if (unsubscribeToken) {
+                await sendBossNotifyInvite({
+                  env: c.env,
+                  appOrigin: new URL(c.req.url).origin,
+                  user,
+                  boss,
+                  vacation: { ...priorApprovedVacation, ical_sequence: toMail.ical_sequence },
+                  category: cat,
+                  method: "PUBLISH",
+                  status: "TENTATIVE",
+                  unsubscribeToken,
+                });
+              }
             } catch (e) {
               console.error("[boss] tentative-update failed", e);
             }
@@ -408,6 +413,17 @@ async function mailVacation(
 
   if (!boss || boss.consent_status !== "consented") return;
 
+  // Every boss-bound email carries the manager's per-relationship
+  // unsubscribe URL (footer + RFC 8058 List-Unsubscribe header). Fetched
+  // once here and passed to whichever sendBoss* helper fires below.
+  const unsubscribeToken = await getBossUnsubscribeToken(env.DB, user.id);
+  if (!unsubscribeToken) {
+    // Defence-in-depth — pre-0008 rows that somehow missed the backfill.
+    // Skip rather than send a malformed unsubscribe URL.
+    console.error("[boss] missing unsubscribe_token for user", user.id);
+    return;
+  }
+
   const method: "PUBLISH" | "CANCEL" =
     lifecycle === "cancelled" || lifecycle === "deleted" ? "CANCEL" : "PUBLISH";
 
@@ -425,6 +441,7 @@ async function mailVacation(
         vacation,
         category,
         method,
+        unsubscribeToken,
       });
     } catch (e) {
       console.error("[boss] notify invite failed:", (e as Error).message);
@@ -449,6 +466,7 @@ async function mailVacation(
           vacation,
           category,
           method: "CANCEL",
+          unsubscribeToken,
         });
       } catch (e) {
         console.error("[boss] approval-mode cancel failed:", (e as Error).message);
@@ -491,6 +509,7 @@ async function mailVacation(
           total_days: usage.total_days,
           remaining_days: usage.remaining_days,
         },
+        unsubscribeToken,
       });
     } catch (e) {
       console.error("[boss] approval request failed:", (e as Error).message);

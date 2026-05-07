@@ -118,7 +118,7 @@ auth.get("/status", async (c) => {
   const n = await userCount(c.env.DB);
   return ok(c, {
     has_users: n > 0,
-    auth_suppressed: isAuthSuppressed(c.env),
+    auth_suppressed: isAuthSuppressed(c),
   });
 });
 
@@ -135,7 +135,7 @@ auth.get("/me", requireAuth, async (c) => {
 // the gate restricts). The first user to register is auto-promoted to admin.
 // ---------------------------------------------------------------------------
 auth.post("/register/start", async (c) => {
-  if (isAuthSuppressed(c.env)) {
+  if (isAuthSuppressed(c)) {
     return err(c, "FORBIDDEN", "Registration disabled while SUPPRESS_AUTH is on.");
   }
 
@@ -173,7 +173,11 @@ auth.post("/register/start", async (c) => {
     );
     return ok(c, result);
   } catch (e) {
-    return err(c, "INTERNAL_ERROR", (e as Error).message);
+    // Don't leak the raw error message to the client — could surface
+    // internal details (KV keys, env names) on a future code change. Log
+    // for ops visibility, return a generic message to the user.
+    console.error("register/start failed", e);
+    return err(c, "INTERNAL_ERROR", "Could not start registration.");
   }
 });
 
@@ -257,7 +261,7 @@ auth.post("/register/finish", async (c) => {
 // providing one lets us narrow `allowCredentials`.
 // ---------------------------------------------------------------------------
 auth.post("/login/start", async (c) => {
-  if (isAuthSuppressed(c.env)) {
+  if (isAuthSuppressed(c)) {
     // Pretend everything's fine — the client should poll /me which will
     // succeed thanks to suppress-auth.
     await ensureDevUser(c.env.DB);
@@ -279,12 +283,14 @@ auth.post("/login/start", async (c) => {
     );
     return ok(c, result);
   } catch (e) {
-    return err(c, "INTERNAL_ERROR", (e as Error).message);
+    // Generic to client, full to logs. Mirrors register/start.
+    console.error("login/start failed", e);
+    return err(c, "INTERNAL_ERROR", "Could not start authentication.");
   }
 });
 
 auth.post("/login/finish", async (c) => {
-  if (isAuthSuppressed(c.env)) {
+  if (isAuthSuppressed(c)) {
     const dev = await ensureDevUser(c.env.DB);
     return ok(c, { user: dev });
   }

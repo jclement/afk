@@ -56,7 +56,7 @@ export function renderEmail(opts: RenderEmailOpts): string {
   const preheader = escapeHtml(opts.preheader);
   return [
     `<!DOCTYPE html>`,
-    `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(opts.heading)}</title></head>`,
+    `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light"><title>${escapeHtml(opts.heading)}</title></head>`,
     `<body style="margin:0;padding:0;background:${COLORS.page};">`,
     // Hidden preheader — controls inbox preview text.
     `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;color:transparent;opacity:0;font-size:1px;line-height:1px">${preheader}</div>`,
@@ -173,6 +173,18 @@ export function escapeHtml(s: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+/**
+ * Escape user-authored text for HTML output, preserving line breaks as `<br>`.
+ *
+ * Use this — never `renderMarkdown` — for content authored by an
+ * unauthenticated party (e.g. the manager's reject reason on the boss flow):
+ * markdown's `[text](url)` lets a hostile or compromised manager ship the
+ * user a phishing link disguised under arbitrary anchor text.
+ */
+export function escapeHtmlMultiline(s: string): string {
+  return escapeHtml(s).replaceAll("\n", "<br>");
 }
 
 /** Small HTML helper: a colored badge (e.g. "Pending", "Cancelled"). */

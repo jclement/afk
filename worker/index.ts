@@ -45,7 +45,7 @@ app.use(
   "*",
   logger((message: string, ...rest: unknown[]) => {
     const redacted = message
-      .replace(/\/boss\/(consent|approve)\/[0-9a-f]+/g, "/boss/$1/<redacted>")
+      .replace(/\/boss\/(consent|approve|unsubscribe)\/[0-9a-f]+/g, "/boss/$1/<redacted>")
       .replace(/\/verify-email\/[0-9a-f]+/g, "/verify-email/<redacted>")
       .replace(/\/ical\/[0-9a-f]+/g, "/ical/<redacted>")
       .replace(/\/api\/v1\/share\/[0-9a-f]+/g, "/api/v1/share/<redacted>")

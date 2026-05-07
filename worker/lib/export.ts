@@ -21,6 +21,7 @@ import type {
   ShareToken,
   User,
   Vacation,
+  VacationApproval,
 } from "../../shared/types.js";
 import { vacationDayCost } from "../../shared/vacation-math.js";
 
@@ -48,9 +49,17 @@ export interface JsonExport {
   /**
    * Boss relationship if any. Single object (the schema supports one per
    * user). Token fields are deliberately NOT included — they're credential
-   * material. Approval history per vacation lives on `vacations.approval_state`.
+   * material.
    */
   boss: BossRelationship | null;
+  /**
+   * Per-(vacation, boss) decision history. Includes pending requests plus
+   * every past approve/reject decision and the manager's free-text comment.
+   * Decision tokens are NOT included — credential material. The
+   * denormalised `vacations.approval_state` is the *current* state; this
+   * array is the audit trail that survives a manager change.
+   */
+  vacation_approvals: VacationApproval[];
   /**
    * Read-only dashboard share links the user minted. The actual `token`
    * value (and the resulting `share_url`) is NOT included — it's a
@@ -67,6 +76,7 @@ export function buildJsonExport(input: {
   allowances: Allowance[];
   vacations: Vacation[];
   boss: BossRelationship | null;
+  vacationApprovals: VacationApproval[];
   shareTokens: ShareToken[];
   appVersion: string;
   now?: Date;
@@ -91,6 +101,7 @@ export function buildJsonExport(input: {
     allowances: input.allowances,
     vacations: input.vacations,
     boss: input.boss,
+    vacation_approvals: input.vacationApprovals,
     share_tokens: input.shareTokens.map((t) => ({
       id: t.id,
       scope: t.scope,
@@ -122,6 +133,7 @@ export function buildVacationsCsv(input: {
     "public_desc",
     "internal_desc",
     "cancelled_at",
+    "approval_state",
     "created_at",
     "updated_at",
     "id",
@@ -141,6 +153,7 @@ export function buildVacationsCsv(input: {
         v.public_desc,
         v.internal_desc,
         v.cancelled_at ?? "",
+        v.approval_state ?? "",
         v.created_at,
         v.updated_at,
         v.id,
@@ -154,14 +167,22 @@ export function buildVacationsCsv(input: {
 }
 
 /**
- * RFC 4180 field encoding: wrap in quotes and double inner quotes if the
- * value contains a comma, quote, CR, or LF.
+ * RFC 4180 field encoding plus CSV-formula-injection guard: wrap in quotes
+ * and double inner quotes if the value contains a comma, quote, CR, or LF;
+ * additionally prefix a single-quote when the value starts with a character
+ * that Excel/LibreOffice treat as a formula trigger (`=`, `+`, `-`, `@`,
+ * `\t`, `\r`). Without the prefix, a vacation note like
+ * `=HYPERLINK("…","click")` runs as a formula when the user opens the CSV.
  */
 function csvField(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replaceAll('"', '""')}"`;
+  let v = value;
+  if (v.length > 0 && /^[=+\-@\t\r]/.test(v)) {
+    v = `'${v}`;
   }
-  return value;
+  if (/[",\r\n]/.test(v)) {
+    return `"${v.replaceAll('"', '""')}"`;
+  }
+  return v;
 }
 
 /**

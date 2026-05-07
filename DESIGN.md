@@ -256,17 +256,26 @@ fallback alternative for spam-filter scoring and bare clients.
 ## Data export
 
 `GET /api/v1/me/export.json` returns a complete dump of every user-owned table (profile,
-categories, allowances, vacations, boss relationship, share-link metadata) in a stable JSON
-envelope (`schema_version: 1`). `export.csv` is a flat vacations-with-category-info view with
-computed day costs, RFC 4180-compliant. The schema lives in `worker/lib/export.ts` and is the
-single source of truth — see CLAUDE.md "Data Export Contract" for the rules around extending it
-when new columns/tables are added.
+categories, allowances, vacations, boss relationship, vacation approval history, share-link
+metadata) in a stable JSON envelope (`schema_version: 1`). `export.csv` is a flat
+vacations-with-category-info view with computed day costs (now including `approval_state`),
+RFC 4180-compliant. The schema lives in `worker/lib/export.ts` and is the single source of
+truth — see CLAUDE.md "Data Export Contract" for the rules around extending it when new
+columns/tables are added.
+
+CSV writes also defend against formula injection: any field whose first character is `=`, `+`,
+`-`, `@`, tab, or CR is prefixed with a single quote so Excel/LibreOffice render it as a literal
+string instead of evaluating it as a formula.
 
 Credential-bearing rows expose only their user-authored metadata (`label`, `scope`, timestamps);
 the secret token values are deliberately omitted. iCal tokens are excluded entirely because the
 row IS the credential — without the token there's nothing useful to migrate. Share tokens
 include label/scope/created_at/last_viewed_at as `share_tokens[]` so a migrating user can see
 which links existed even though they can't reconstruct working URLs from the dump.
+
+`vacation_approvals[]` contains the full per-(vacation, boss) decision audit trail — pending
+requests plus every past approve/reject and the manager's free-text reason — so the history
+survives a manager change. Decision tokens are stripped (credential material).
 
 ## Boss / approver (optional, opt-in)
 
@@ -287,14 +296,32 @@ Two new tables (`migrations/0005_boss.sql`):
 
 | Table                | Purpose                               | Notable columns                                                                               |
 | -------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `boss_relationships` | One per user                          | `boss_email`, `boss_display_name`, `mode`, `consent_token`, `consented_at`, `revoked_at`      |
+| `boss_relationships` | One per user                          | `boss_email`, `mode`, `consent_token`, `consented_at`, `revoked_at`, `unsubscribe_token`      |
 | `vacation_approvals` | Per (vacation, boss) approval request | `state` (`pending`/`approved`/`rejected`), `decision_token`, `decided_at`, `decision_comment` |
 
 `vacations.approval_state` is denormalised onto the row so the dashboard query doesn't need a
 join. Tokens are 64-char hex (32 bytes), single-use after the action, with a 7-day TTL on
 consent and 14-day TTL on decisions. Public boss pages (`/boss/consent/:token`,
-`/boss/approve/:token`) live outside `/api/v1` because the boss has no account — the URL token
-IS the auth, format-gated to constant-time-404 bogus probes.
+`/boss/approve/:token`, `/boss/unsubscribe/:token`) live outside `/api/v1` because the boss has
+no account — the URL token IS the auth, format-gated to constant-time-404 bogus probes.
+
+### Manager-side notifications & one-click unsubscribe
+
+Two state-change emails fire back to the _user_ without them having to refresh the dashboard:
+
+- **Consent accepted** — manager clicks the consent link → user gets "you're connected." Fires
+  exactly once; the token-burn in `acceptBossConsent` is the gate against double-fire.
+- **Consent revoked** — manager clicks the unsubscribe link → user gets "your manager
+  unsubscribed; pick someone new." Fires exactly once; `revokeBoss` returns `{ changed: false }`
+  on the second click, so a manager double-clicking from two open emails doesn't spam.
+
+The unsubscribe link is **per-relationship**, long-lived (no expiry), embedded in every
+boss-bound email's footer **and** as an `RFC 8058 List-Unsubscribe` + `List-Unsubscribe-Post`
+header (Gmail/Outlook surface their native one-click button). The token rotates on email/mode
+change in `upsertBoss` so a previously-known address can't revoke a freshly-pointed
+relationship. `GET /boss/unsubscribe/:token` renders a confirm form (so a link-prefetch can't
+burn the action); `POST` does the work — same endpoint serves both the form's POST and Gmail's
+RFC 8058 one-click.
 
 Calendar lifecycle in approval mode:
 
