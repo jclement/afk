@@ -180,15 +180,37 @@ describe("boss API", () => {
   });
 });
 
-async function fetchTokenFromDb(userId: string): Promise<string> {
-  const row = await env.DB.prepare(`SELECT consent_token FROM boss_relationships WHERE user_id = ?`)
-    .bind(userId)
-    .first<{ consent_token: string }>();
-  if (!row?.consent_token) throw new Error("no consent token");
-  return row.consent_token;
+/**
+ * Pull the plaintext consent / decision token out of a captured email. We
+ * have to scrape the email body because tokens are SHA-256 hashed at rest
+ * (see boss-store.ts) — the DB only has the hash. The plaintext exists
+ * exactly once: in the email URL we just sent.
+ *
+ * Polls briefly because the consent email is fired via `waitUntil` and may
+ * not have arrived in `sent` yet when the test asks for it.
+ */
+async function waitForTokenInEmail(re: RegExp, opts?: { to?: string }): Promise<string> {
+  for (let i = 0; i < 20; i++) {
+    for (const m of sent) {
+      if (opts?.to && m.to !== opts.to) continue;
+      const match = re.exec(m.text);
+      if (match) return match[1]!;
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error(`Token matching ${re} not found in any captured email`);
+}
+
+// Compatibility shim — older tests just want "the most-recent consent token
+// for this user." The mock captures consent emails as they're sent, so we
+// pull from there.
+async function fetchTokenFromDb(_userId: string): Promise<string> {
+  return waitForTokenInEmail(/\/boss\/consent\/([0-9a-f]{64})/);
 }
 
 async function fetchUnsubscribeTokenFromDb(userId: string): Promise<string> {
+  // Unsubscribe tokens stay plaintext at rest — see boss-store.ts. So this
+  // helper still queries the DB directly.
   const row = await env.DB.prepare(
     `SELECT unsubscribe_token FROM boss_relationships WHERE user_id = ?`,
   )
@@ -196,6 +218,10 @@ async function fetchUnsubscribeTokenFromDb(userId: string): Promise<string> {
     .first<{ unsubscribe_token: string }>();
   if (!row?.unsubscribe_token) throw new Error("no unsubscribe token");
   return row.unsubscribe_token;
+}
+
+async function fetchDecisionTokenFromEmail(): Promise<string> {
+  return waitForTokenInEmail(/\/boss\/approve\/([0-9a-f]{64})/);
 }
 
 /**
@@ -426,16 +452,12 @@ describe("boss approval flow", () => {
     expect(reqEmail).toBeDefined();
     expect(reqEmail!.text).toMatch(/\/boss\/approve\//);
 
-    const tokenRow = await env.DB.prepare(
-      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
-    )
-      .bind(cBody.data.id)
-      .first<{ decision_token: string }>();
+    const decisionToken = await fetchDecisionTokenFromEmail();
     return {
       cookie,
       userId,
       vacationId: cBody.data.id,
-      decisionToken: tokenRow!.decision_token,
+      decisionToken,
     };
   }
 
@@ -516,11 +538,11 @@ describe("boss approval flow", () => {
     const html = await res.text();
     expect(html).toContain("required");
     // Token is NOT burned — the user can fix the comment and submit again.
+    // Just verify that some non-null decision_token still exists; we can't
+    // SELECT by plaintext anymore because the column holds the SHA-256 hash.
     const row = await env.DB.prepare(
-      `SELECT decision_token FROM vacation_approvals WHERE decision_token = ?`,
-    )
-      .bind(decisionToken)
-      .first();
+      `SELECT decision_token FROM vacation_approvals WHERE decision_token IS NOT NULL`,
+    ).first<{ decision_token: string }>();
     expect(row).not.toBeNull();
   });
 
@@ -616,13 +638,8 @@ describe("boss security regressions", () => {
     });
     const vId = ((await v.json()) as { data: { id: string } }).data.id;
     // Wait for the waitUntil-fired approval-request to mint the decision token.
-    await new Promise((r) => setTimeout(r, 20));
-    const oldDt = await env.DB.prepare(
-      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
-    )
-      .bind(vId)
-      .first<{ decision_token: string }>();
-    expect(oldDt!.decision_token).toBeTruthy();
+    const oldDecisionToken = await fetchDecisionTokenFromEmail();
+    expect(oldDecisionToken).toBeTruthy();
 
     // User changes boss email — old approval token must die so the old
     // boss can't approve and ship the result to the new boss's address.
@@ -640,7 +657,7 @@ describe("boss security regressions", () => {
     // And the old boss's link 404s.
     expect(
       (
-        await unauthedFetch(`/boss/approve/${oldDt!.decision_token}`, {
+        await unauthedFetch(`/boss/approve/${oldDecisionToken}`, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: "action=approve",
@@ -698,17 +715,14 @@ describe("boss security regressions", () => {
         internal_desc: "",
       },
     });
-    const vId = ((await v.json()) as { data: { id: string } }).data.id;
-    await new Promise((r) => setTimeout(r, 20));
-    const dt = await env.DB.prepare(
-      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
-    )
-      .bind(vId)
-      .first<{ decision_token: string }>();
-    const tok = dt!.decision_token;
+    void ((await v.json()) as { data: { id: string } });
+    const tok = await fetchDecisionTokenFromEmail();
 
-    // User self-cancels.
-    await authedFetch(cookie, `/api/v1/vacations/${vId}/cancel`, { method: "POST" });
+    // User self-cancels — fetch the vacation id first.
+    const vId2 = await env.DB.prepare(`SELECT vacation_id FROM vacation_approvals LIMIT 1`).first<{
+      vacation_id: string;
+    }>();
+    await authedFetch(cookie, `/api/v1/vacations/${vId2!.vacation_id}/cancel`, { method: "POST" });
 
     // Boss tries to approve via stale link → 404.
     expect(
@@ -742,13 +756,8 @@ describe("boss security regressions", () => {
         internal_desc: "",
       },
     });
-    const vId = ((await v.json()) as { data: { id: string } }).data.id;
-    await new Promise((r) => setTimeout(r, 20));
-    const tok = (await env.DB.prepare(
-      `SELECT decision_token FROM vacation_approvals WHERE vacation_id = ?`,
-    )
-      .bind(vId)
-      .first<{ decision_token: string }>())!.decision_token;
+    void ((await v.json()) as { data: { id: string } });
+    const tok = await fetchDecisionTokenFromEmail();
     sent.length = 0;
 
     // Sequential is enough — the second hit must find the token gone.

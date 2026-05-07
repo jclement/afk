@@ -1,14 +1,15 @@
 /**
  * Session management — create, look up, refresh, and destroy server-side
- * sessions stored in D1. Cookies carry only the session token; everything
- * else (user_id, expiry, last_seen) lives in the database so we can revoke
- * a session instantly without waiting for the cookie to expire.
+ * sessions stored in D1. Cookies carry the random plaintext token; the DB
+ * row's `id` is the SHA-256 hash of that token. A read-only DB leak therefore
+ * yields no usable cookie value — the attacker would have to pre-image SHA-256
+ * to forge a session.
  */
 
 import type { D1Database } from "@cloudflare/workers-types";
 import type { Context } from "hono";
 import { setCookie, deleteCookie } from "hono/cookie";
-import { newSessionToken } from "./ids.js";
+import { hashToken, newSessionToken } from "./ids.js";
 
 export const SESSION_COOKIE = "afk_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -21,14 +22,24 @@ export interface SessionRecord {
   last_seen_at: string;
 }
 
-/** Create a session row and return the token (also the row id). */
+export interface SessionWithToken extends SessionRecord {
+  /** Plaintext token to stash in the cookie. Never stored anywhere else. */
+  token: string;
+}
+
+/**
+ * Create a session row and return both the SessionRecord (with the hashed id)
+ * and the plaintext token to put in the cookie. The plaintext is never
+ * persisted — once the function returns, only the caller's cookie has it.
+ */
 export async function createSession(
   db: D1Database,
   userId: string,
   ua: string | null,
   ip: string | null,
-): Promise<SessionRecord> {
-  const id = newSessionToken();
+): Promise<SessionWithToken> {
+  const token = newSessionToken();
+  const id = await hashToken(token);
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   await db
     .prepare(
@@ -48,35 +59,54 @@ export async function createSession(
     expires_at: expiresAt,
     created_at: new Date().toISOString(),
     last_seen_at: new Date().toISOString(),
+    token,
   };
 }
 
 export async function getSession(db: D1Database, token: string): Promise<SessionRecord | null> {
+  const id = await hashToken(token);
   const row = await db
     .prepare(
       `SELECT id, user_id, expires_at, created_at, last_seen_at
        FROM sessions WHERE id = ?`,
     )
-    .bind(token)
+    .bind(id)
     .first<SessionRecord>();
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(token).run();
+    await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(id).run();
     return null;
   }
   return row;
 }
 
-/** Update last_seen_at; non-blocking from the caller's perspective. */
-export async function touchSession(db: D1Database, token: string): Promise<void> {
+/**
+ * Update last_seen_at on the session whose row id is `id`. The id is the
+ * SHA-256 hash of the cookie token; callers that already resolved the
+ * session (via getSession) pass `session.id` directly. Callers holding only
+ * the cookie token should hash first.
+ */
+export async function touchSessionById(db: D1Database, id: string): Promise<void> {
   await db
     .prepare(`UPDATE sessions SET last_seen_at = datetime('now') WHERE id = ?`)
-    .bind(token)
+    .bind(id)
     .run();
 }
 
+/** Destroy by cookie token (hashes internally). */
 export async function destroySession(db: D1Database, token: string): Promise<void> {
-  await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(token).run();
+  const id = await hashToken(token);
+  await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(id).run();
+}
+
+/** Destroy by session id (already-hashed). Used after we've resolved a session. */
+export async function destroySessionById(db: D1Database, id: string): Promise<void> {
+  await db.prepare(`DELETE FROM sessions WHERE id = ?`).bind(id).run();
+}
+
+/** Destroy every session for a user. Used by account deletion. */
+export async function destroyAllSessionsForUser(db: D1Database, userId: string): Promise<void> {
+  await db.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
 }
 
 /** Drop expired sessions. Intended to be called from a scheduled handler or login. */

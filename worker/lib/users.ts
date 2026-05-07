@@ -3,13 +3,13 @@
  */
 
 import type { D1Database } from "@cloudflare/workers-types";
-import { newId } from "./ids.js";
+import { hashToken, newId } from "./ids.js";
 import type { User } from "../../shared/types.js";
 
 export const DEV_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 const SELECT_USER =
-  "SELECT id, username, display_name, role, email, email_verified_at, timezone, created_at, last_login_at FROM users";
+  "SELECT id, username, display_name, role, email, email_verified_at, timezone, created_at, last_login_at, welcome_completed_at FROM users";
 
 export async function getUser(db: D1Database, id: string): Promise<User | null> {
   return await db.prepare(`${SELECT_USER} WHERE id = ?`).bind(id).first<User>();
@@ -145,13 +145,14 @@ export async function startEmailChange(
   await db.prepare(`DELETE FROM email_verifications WHERE user_id = ?`).bind(userId).run();
 
   const token = randomToken(32);
+  const tokenHash = await hashToken(token);
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   await db
     .prepare(
       `INSERT INTO email_verifications (id, user_id, email, token, expires_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .bind(newId(), userId, normalized, token, expires)
+    .bind(newId(), userId, normalized, tokenHash, expires)
     .run();
   return { token, expires_at: expires };
 }
@@ -162,20 +163,21 @@ export async function startEmailChange(
  * a stale token re-verifying a since-changed address).
  */
 export async function verifyEmailToken(db: D1Database, token: string): Promise<User | null> {
+  const tokenHash = await hashToken(token);
   const row = await db
     .prepare(`SELECT user_id, email, expires_at FROM email_verifications WHERE token = ?`)
-    .bind(token)
+    .bind(tokenHash)
     .first<{ user_id: string; email: string; expires_at: string }>();
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    await db.prepare(`DELETE FROM email_verifications WHERE token = ?`).bind(token).run();
+    await db.prepare(`DELETE FROM email_verifications WHERE token = ?`).bind(tokenHash).run();
     return null;
   }
   const user = await getUser(db, row.user_id);
   if (!user || user.email !== row.email) {
     // Stale: user changed their email between issue and click. Drop the row
     // and refuse — they'll need to re-request.
-    await db.prepare(`DELETE FROM email_verifications WHERE token = ?`).bind(token).run();
+    await db.prepare(`DELETE FROM email_verifications WHERE token = ?`).bind(tokenHash).run();
     return null;
   }
   await db
@@ -198,13 +200,14 @@ export async function reissueEmailToken(
   if (!user?.email || user.email_verified_at) return null;
   await db.prepare(`DELETE FROM email_verifications WHERE user_id = ?`).bind(userId).run();
   const token = randomToken(32);
+  const tokenHash = await hashToken(token);
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   await db
     .prepare(
       `INSERT INTO email_verifications (id, user_id, email, token, expires_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .bind(newId(), userId, user.email, token, expires)
+    .bind(newId(), userId, user.email, tokenHash, expires)
     .run();
   return { token, email: user.email, expires_at: expires };
 }
@@ -216,6 +219,51 @@ export async function purgeExpiredEmailVerifications(db: D1Database): Promise<vo
   await db
     .prepare(`DELETE FROM email_verifications WHERE julianday(expires_at) < julianday('now')`)
     .run();
+}
+
+/**
+ * Mark the first-run wizard complete. The wizard's "save your recovery codes"
+ * step is the only mandatory one; this endpoint is hit when the user clicks
+ * the final "Got it" button.
+ */
+export async function markWelcomeCompleted(db: D1Database, userId: string): Promise<User | null> {
+  await db
+    .prepare(`UPDATE users SET welcome_completed_at = datetime('now') WHERE id = ?`)
+    .bind(userId)
+    .run();
+  return getUser(db, userId);
+}
+
+/**
+ * Hard-delete the user and every row that hangs off them.
+ *
+ * The schema's foreign keys are mostly `ON DELETE CASCADE` from each table
+ * to `users(id)`, so deleting the parent row is *almost* enough — but two
+ * things need explicit cleanup:
+ *
+ *   1. `vacations.category_id` is `ON DELETE RESTRICT`, which would otherwise
+ *      block the cascade if any vacations remain. We delete vacations first.
+ *   2. `vacation_approvals` cascades from `vacations`, not from `users`, so
+ *      they go via step 1.
+ *
+ * The order below is the safe topological order. SQLite's FOREIGN KEYS
+ * pragma is ON in D1 by default, so RESTRICT will throw if we get this
+ * wrong.
+ */
+export async function deleteUserAndAllData(db: D1Database, userId: string): Promise<void> {
+  await db.batch([
+    db.prepare(`DELETE FROM vacations WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM allowances WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM categories WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM ical_tokens WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM share_tokens WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM email_verifications WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM boss_relationships WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM recovery_codes WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM credentials WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId),
+    db.prepare(`DELETE FROM users WHERE id = ?`).bind(userId),
+  ]);
 }
 
 export async function clearUserEmail(db: D1Database, userId: string): Promise<void> {

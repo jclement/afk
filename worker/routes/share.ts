@@ -61,20 +61,9 @@ const SHARE_TOKEN_RE = /^[0-9a-f]{48}$/;
 export const shareTokensApi = new Hono<HonoVars>();
 shareTokensApi.use("*", requireAuth);
 
-/**
- * Origin to embed in `share_url`. Derived from the request URL so it works
- * across the dev server, *.workers.dev, and the prod custom domain without
- * needing APP_ORIGIN set as a worker var. wrangler.toml's header comment
- * already promises "APP_ORIGIN is derived from the request URL at runtime";
- * this is that derivation.
- */
-function originOf(c: { req: { url: string } }): string {
-  return new URL(c.req.url).origin;
-}
-
 shareTokensApi.get("/", async (c) => {
   const user = authedUser(c);
-  return ok(c, await listShareTokens(c.env.DB, user.id, originOf(c)));
+  return ok(c, await listShareTokens(c.env.DB, user.id));
 });
 
 shareTokensApi.post("/", async (c) => {
@@ -98,11 +87,15 @@ shareTokensApi.post("/", async (c) => {
     }
     throw e;
   }
-  const all = await listShareTokens(c.env.DB, user.id, originOf(c));
-  // Find the freshly-minted row by its share_url suffix — labels can repeat
-  // and the same scope can be minted multiple times.
-  const created = all.find((t) => t.share_url.endsWith(`/${token}`));
-  return ok(c, created, 201);
+  const all = await listShareTokens(c.env.DB, user.id);
+  // Match by (scope, label, created_at desc) — the just-inserted row is the
+  // most recent for this user. Labels can repeat across creations.
+  const created = [...all].reverse().find((t) => t.scope === scope && t.label === label);
+  if (!created) return err(c, "INTERNAL_ERROR", "Token created but not found.");
+  // share_url is only returned at creation — the plaintext is hashed in D1
+  // immediately and can never be recovered. UI shows it once with copy/save.
+  const origin = new URL(c.req.url).origin;
+  return ok(c, { ...created, share_url: `${origin}/share/${token}` }, 201);
 });
 
 shareTokensApi.delete("/:id", async (c) => {

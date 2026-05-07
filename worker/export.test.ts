@@ -73,6 +73,9 @@ describe("data export", () => {
       expect(u.created_at).toBeDefined();
       // last_login_at populated by createSession in the test helper.
       expect(u.last_login_at).toBeDefined();
+      // welcome_completed_at is null for fresh accounts but the field must
+      // be present in the export.
+      expect("welcome_completed_at" in u).toBe(true);
 
       // Every user-data table is present.
       // ⚠️  ADD A NEW ASSERTION HERE WHEN YOU ADD A NEW TABLE — see CLAUDE.md

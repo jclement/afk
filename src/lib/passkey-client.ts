@@ -109,3 +109,37 @@ export async function loginWithPasskey(username?: string): Promise<User> {
   });
   return finish.user;
 }
+
+/**
+ * Run the WebAuthn ceremony but stop short of POSTing to /login/finish — used
+ * by flows that need a fresh assertion to ship to a different endpoint (e.g.
+ * DELETE /api/v1/me/account, which wants `{ flow_id, response, confirm }`).
+ */
+export async function getPasskeyAssertion(
+  username: string,
+): Promise<{ flow_id: string; response: unknown; suppressed?: boolean }> {
+  assertWebAuthnSupported();
+  const start = await api<AuthStartResponse>(`${API_BASE}/auth/login/start`, {
+    method: "POST",
+    json: { username },
+  });
+  if (start.suppressed) {
+    // SUPPRESS_AUTH dev mode — the backend route already short-circuits on
+    // its own, but we still need *something* to ship. The actual delete
+    // endpoint requires a real flow, so this branch only matters for flows
+    // that ignore the assertion in dev — callers should check `suppressed`.
+    return { flow_id: "", response: null, suppressed: true };
+  }
+  if (!start.options || !start.flow_id) {
+    throw new Error("Login start did not return options.");
+  }
+  let response;
+  try {
+    response = await browserStartAuth({ optionsJSON: start.options });
+  } catch (e) {
+    throw new Error(`Could not authenticate: ${(e as Error).message}`, {
+      cause: e,
+    });
+  }
+  return { flow_id: start.flow_id, response };
+}

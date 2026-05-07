@@ -26,6 +26,8 @@ import migration0006 from "../migrations/0006_drop_boss_display_name.sql?raw";
 import migration0007 from "../migrations/0007_share_tokens.sql?raw";
 // @ts-expect-error vite raw imports aren't part of the worker tsconfig
 import migration0008 from "../migrations/0008_boss_unsubscribe_token.sql?raw";
+// @ts-expect-error vite raw imports aren't part of the worker tsconfig
+import migration0009 from "../migrations/0009_hash_tokens_and_recovery.sql?raw";
 import app from "./index.js";
 import type { Env } from "./types.js";
 import { createSession } from "./lib/sessions.js";
@@ -38,6 +40,7 @@ export { app };
 /** Fresh schema in the in-memory D1 instance — call from beforeEach. */
 export async function applyMigrations(): Promise<void> {
   const dropTables = [
+    "recovery_codes",
     "share_tokens",
     "vacation_approvals",
     "boss_relationships",
@@ -66,6 +69,7 @@ export async function applyMigrations(): Promise<void> {
     migration0006 as string,
     migration0007 as string,
     migration0008 as string,
+    migration0009 as string,
   ]) {
     const cleaned = sql
       .split("\n")
@@ -97,7 +101,9 @@ export async function createTestSession(opts?: {
   const session = await createSession(env.DB, user.id, "vitest", "127.0.0.1");
   return {
     user,
-    cookie: `afk_session=${session.id}`,
+    // The cookie carries the plaintext token; D1 stores only the SHA-256 hash
+    // (session.id). createSession returns both.
+    cookie: `afk_session=${session.token}`,
   };
 }
 

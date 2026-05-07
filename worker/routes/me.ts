@@ -9,11 +9,16 @@ import { authedUser, requireAuth } from "../lib/auth.js";
 import { err, ok } from "../lib/responses.js";
 import {
   clearUserEmail,
+  deleteUserAndAllData,
+  markWelcomeCompleted,
   reissueEmailToken,
   setUserDisplayName,
   setUserTimezone,
   startEmailChange,
 } from "../lib/users.js";
+import { AuthError, finishAuthentication } from "../lib/passkeys.js";
+import { updateCredentialCounter } from "../lib/store.js";
+import { clearSessionCookie } from "../lib/sessions.js";
 import { sendPlainEmail } from "../lib/mailgun.js";
 import {
   button,
@@ -95,6 +100,70 @@ r.patch("/display-name", async (c) => {
   }
 });
 
+r.post("/welcome-completed", async (c) => {
+  const user = authedUser(c);
+  const updated = await markWelcomeCompleted(c.env.DB, user.id);
+  if (!updated) return err(c, "NOT_FOUND", "User not found.");
+  return ok(c, updated);
+});
+
+/**
+ * DELETE /api/v1/me/account — irreversibly delete the user's account and
+ * every row tied to it.
+ *
+ * Two confirmations:
+ *   1. A fresh passkey assertion (the same WebAuthn dance as login). The
+ *      client first calls POST /api/v1/auth/login/start with the user's own
+ *      username to mint a flow_id+challenge, runs the ceremony, then ships
+ *      `{ flow_id, response, confirm }` here. The credential MUST belong to
+ *      the currently-authenticated user — guards against a stolen-cookie
+ *      attacker (who has the cookie but no passkey) deleting the account.
+ *   2. The literal phrase "DELETE MY ACCOUNT" typed verbatim. Stops "I
+ *      didn't mean to click that" mistakes that a passkey tap couldn't
+ *      catch.
+ *
+ * After deletion the session cookie is cleared and the response is 200 with
+ * `{ deleted: true }` — the client should redirect to the login screen.
+ */
+r.delete("/account", async (c) => {
+  const user = authedUser(c);
+  const body = await c.req
+    .json<{ flow_id?: string; response?: unknown; confirm?: string }>()
+    .catch(() => ({}) as { flow_id?: string; response?: unknown; confirm?: string });
+  if (body.confirm !== "DELETE MY ACCOUNT") {
+    return err(c, "VALIDATION_ERROR", "Type DELETE MY ACCOUNT exactly to confirm.");
+  }
+  if (!body.flow_id || !body.response) {
+    return err(c, "VALIDATION_ERROR", "Passkey reauthentication required.");
+  }
+  // Re-authenticate via WebAuthn. Throws AuthError on bad assertion.
+  let result;
+  try {
+    const url = new URL(c.req.url);
+    result = await finishAuthentication(
+      c.env.KV,
+      c.env.DB,
+      { rpID: url.hostname, rpName: c.env.RP_NAME, origin: `${url.protocol}//${url.host}` },
+      body.flow_id,
+      body.response as never,
+    );
+  } catch (e) {
+    if (e instanceof AuthError) return err(c, e.code, e.message);
+    console.error("[me/account] reauth failed", e);
+    return err(c, "INTERNAL_ERROR", "Reauthentication failed.");
+  }
+  // The credential MUST belong to the currently-authenticated user. A
+  // sibling user's valid passkey would otherwise let one account delete
+  // another via this endpoint.
+  if (result.user_id !== user.id) {
+    return err(c, "FORBIDDEN", "Passkey does not belong to this account.");
+  }
+  await updateCredentialCounter(c.env.DB, result.credential_id, result.new_counter);
+  await deleteUserAndAllData(c.env.DB, user.id);
+  clearSessionCookie(c);
+  return ok(c, { deleted: true });
+});
+
 r.patch("/timezone", async (c) => {
   const user = authedUser(c);
   const body = await c.req.json<{ timezone?: string }>().catch(() => ({}) as { timezone?: string });
@@ -126,7 +195,7 @@ r.get("/export.json", async (c) => {
       listAllVacations(c.env.DB, user.id),
       getBoss(c.env.DB, user.id),
       listAllApprovalsForUser(c.env.DB, user.id),
-      listShareTokens(c.env.DB, user.id, c.env.APP_ORIGIN ?? ""),
+      listShareTokens(c.env.DB, user.id),
     ]);
   const payload = buildJsonExport({
     user,

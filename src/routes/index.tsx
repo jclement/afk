@@ -3,9 +3,9 @@
  * vacation list. The single most-used screen in the app.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, FileDown, Calendar } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, FileDown, Calendar, LifeBuoy, X } from "lucide-react";
 import {
   useCancelVacation,
   useDeleteVacation,
@@ -21,13 +21,17 @@ import type { Vacation } from "@shared/types";
 
 export const Route = createFileRoute("/")({
   component: DashboardPage,
-  validateSearch: (raw): { year?: number } => ({
+  validateSearch: (raw): { year?: number; recovery?: number } => ({
     year:
       typeof raw.year === "string"
         ? Number(raw.year)
         : typeof raw.year === "number"
           ? raw.year
           : undefined,
+    recovery:
+      // After a recovery-code login the login route appends ?recovery=1 so we
+      // can show a one-line nudge. Anything else gets dropped silently.
+      raw.recovery === 1 || raw.recovery === "1" ? 1 : undefined,
   }),
 });
 
@@ -44,9 +48,15 @@ function DashboardPage() {
 
   const [bookingOpen, setBookingOpen] = useState(false);
   const [editing, setEditing] = useState<Vacation | null>(null);
+  const [recoveryNudge, setRecoveryNudge] = useState(search.recovery === 1);
 
   function setYear(next: number) {
     navigate({ search: { year: next }, replace: true });
+  }
+
+  function dismissRecoveryNudge() {
+    setRecoveryNudge(false);
+    navigate({ search: { year: search.year }, replace: true });
   }
 
   function handleDelete(id: string) {
@@ -64,6 +74,36 @@ function DashboardPage() {
       {/* Visually-hidden h1 for screen-reader users — the year picker doubles
           as the visual title. Document outline rule: every page gets one h1. */}
       <h1 className="sr-only">Dashboard — {year}</h1>
+      {recoveryNudge && (
+        <div
+          className="rounded border px-3 py-2 flex items-start gap-2 text-xs"
+          style={{
+            borderColor: "var(--color-warning)",
+            background: "color-mix(in srgb, var(--color-warning) 12%, transparent)",
+          }}
+          role="status"
+        >
+          <LifeBuoy
+            className="w-4 h-4 mt-0.5 text-[color:var(--color-warning)] shrink-0"
+            aria-hidden="true"
+          />
+          <div className="flex-1 text-subtle">
+            Recovery code accepted.{" "}
+            <Link to="/settings" className="underline text-heading">
+              Add a new passkey in Settings
+            </Link>{" "}
+            to restore one-tap login.
+          </div>
+          <button
+            type="button"
+            className="p-1 rounded hover:bg-hover text-muted"
+            onClick={dismissRecoveryNudge}
+            aria-label="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="inline-flex items-center bg-surface border border-subtle rounded">

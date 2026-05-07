@@ -18,6 +18,9 @@ export interface User {
   created_at: string;
   /** Most recent successful login. Null until the first login. */
   last_login_at: string | null;
+  /** Null until the user finishes the first-run wizard. Drives the post-login
+   *  redirect to /welcome for new + pre-existing users. */
+  welcome_completed_at: string | null;
 }
 
 export interface Category {
@@ -107,7 +110,13 @@ export interface ICalToken {
   label: string;
   created_at: string;
   last_used_at: string | null;
-  feed_url: string;
+  /**
+   * Full feed URL. Only populated on creation (POST returns it once); list
+   * endpoints omit it because tokens are stored as SHA-256 hashes server-side
+   * and the plaintext is unrecoverable. Users who lose the URL must delete
+   * the token and create a new one.
+   */
+  feed_url?: string;
 }
 
 export type ShareScope = "current-year" | "all-years";
@@ -118,8 +127,9 @@ export interface ShareToken {
   label: string;
   created_at: string;
   last_viewed_at: string | null;
-  /** Full URL the user copies to share. Built by the server. */
-  share_url: string;
+  /** Full URL the user copies to share. Only populated on creation — see
+   *  ICalToken.feed_url for the rationale. */
+  share_url?: string;
 }
 
 /**

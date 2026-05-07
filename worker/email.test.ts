@@ -12,6 +12,7 @@ import {
   env,
   unauthedFetch,
 } from "./test-utils.js";
+import { startEmailChange } from "./lib/users.js";
 
 describe("email + verification", () => {
   beforeEach(applyMigrations);
@@ -43,21 +44,13 @@ describe("email + verification", () => {
 
   it("verifies via the public /verify-email/:token route", async () => {
     const { cookie, user } = await createTestSession({ username: "alice" });
-    await authedFetch(cookie, "/api/v1/me/email", {
-      method: "PATCH",
-      json: { email: "alice@example.com" },
-    });
-
-    // Pull the token directly out of D1 — the test bypass for "what would
-    // have been emailed."
-    const row = await env.DB.prepare("SELECT token FROM email_verifications WHERE user_id = ?")
-      .bind(user.id)
-      .first<{ token: string }>();
-    expect(row?.token).toBeTruthy();
+    // Issue the verification directly so we have the plaintext token. D1
+    // stores only the hash, so we can't read it back from the row.
+    const { token } = await startEmailChange(env.DB, user.id, "alice@example.com");
 
     // Verification works without auth (user often clicks the link on a
     // different device).
-    const res = await unauthedFetch(`/verify-email/${row!.token}`, {
+    const res = await unauthedFetch(`/verify-email/${token}`, {
       redirect: "manual",
     });
     expect(res.status).toBe(302);
@@ -78,14 +71,8 @@ describe("email + verification", () => {
 
   it("changing the email re-issues a token and clears verified", async () => {
     const { cookie, user } = await createTestSession({ username: "alice" });
-    await authedFetch(cookie, "/api/v1/me/email", {
-      method: "PATCH",
-      json: { email: "alice@example.com" },
-    });
-    const first = await env.DB.prepare("SELECT token FROM email_verifications WHERE user_id = ?")
-      .bind(user.id)
-      .first<{ token: string }>();
-    await unauthedFetch(`/verify-email/${first!.token}`, { redirect: "manual" });
+    const { token: first } = await startEmailChange(env.DB, user.id, "alice@example.com");
+    await unauthedFetch(`/verify-email/${first}`, { redirect: "manual" });
 
     // Change email — should clear verified_at and mint a new token.
     await authedFetch(cookie, "/api/v1/me/email", {

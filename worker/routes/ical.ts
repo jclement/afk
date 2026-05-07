@@ -47,7 +47,7 @@ tokensApi.use("*", requireAuth);
 
 tokensApi.get("/", async (c) => {
   const user = authedUser(c);
-  return ok(c, await listICalTokens(c.env.DB, user.id, c.env.APP_ORIGIN));
+  return ok(c, await listICalTokens(c.env.DB, user.id));
 });
 
 tokensApi.post("/", async (c) => {
@@ -72,9 +72,13 @@ tokensApi.post("/", async (c) => {
     }
     throw e;
   }
-  const all = await listICalTokens(c.env.DB, user.id, c.env.APP_ORIGIN);
+  const all = await listICalTokens(c.env.DB, user.id);
   const created = all.find((t) => t.scope === scope && t.label === label);
-  return ok(c, created, 201);
+  if (!created) return err(c, "INTERNAL_ERROR", "Token created but not found.");
+  // feed_url is only ever returned at creation time — D1 stores the hash, so
+  // the URL is unrecoverable later. Surface it once for the user to copy.
+  const origin = new URL(c.req.url).origin;
+  return ok(c, { ...created, feed_url: `${origin}/ical/${token}.ics` }, 201);
 });
 
 tokensApi.delete("/:id", async (c) => {

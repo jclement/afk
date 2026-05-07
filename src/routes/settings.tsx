@@ -3,7 +3,7 @@
  * page, four sections.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -18,6 +18,9 @@ import {
   UserCheck,
   User as UserIcon,
   Share2,
+  AlertTriangle,
+  ShieldAlert,
+  LifeBuoy,
 } from "lucide-react";
 import {
   useAllowances,
@@ -27,6 +30,7 @@ import {
   useCreateCategory,
   useCreateICalToken,
   useCreateShareToken,
+  useDeleteAccount,
   useDeleteBoss,
   useDeleteCategory,
   useDeleteICalToken,
@@ -34,6 +38,8 @@ import {
   useDeleteShareToken,
   useICalTokens,
   usePasskeys,
+  useRecoveryCodesStatus,
+  useRegenerateRecoveryCodes,
   useRenamePasskey,
   useResendBossConsent,
   useResendEmailVerification,
@@ -45,9 +51,10 @@ import {
   useUpsertAllowance,
   useUpsertBoss,
 } from "../api/hooks";
-import { registerPasskey } from "../lib/passkey-client";
+import { getPasskeyAssertion, registerPasskey } from "../lib/passkey-client";
 import { useMe } from "../api/hooks";
 import { currentYearInTimezone } from "../../shared/vacation-math";
+import { Modal } from "../components/Modal";
 import type { BossRelationship } from "@shared/types";
 
 export const Route = createFileRoute("/settings")({
@@ -74,7 +81,9 @@ function SettingsPage() {
       <PasskeysSection />
       <ICalSection />
       <ShareLinksSection />
+      <RecoveryCodesSection />
       <ExportSection />
+      <DangerZoneSection />
     </div>
   );
 }
@@ -1002,20 +1011,17 @@ function PasskeysSection() {
 }
 
 // ---------------------------------------------------------------------------
-// iCal feeds
+// iCal feeds — URL is shown ONCE at creation. The list endpoint no longer
+// returns the plaintext URL (tokens are SHA-256 hashed in D1), so we surface
+// freshly-minted URLs in a banner and tell the user to delete-and-recreate
+// to rotate.
 // ---------------------------------------------------------------------------
 function ICalSection() {
   const tokens = useICalTokens();
   const create = useCreateICalToken();
   const del = useDeleteICalToken();
-  const [copied, setCopied] = useState<string | null>(null);
   const [label, setLabel] = useState("");
-
-  function copy(url: string) {
-    navigator.clipboard.writeText(url);
-    setCopied(url);
-    setTimeout(() => setCopied(null), 1500);
-  }
+  const [fresh, setFresh] = useState<{ id: string; url: string; scope: string } | null>(null);
 
   return (
     <section className="card p-4">
@@ -1024,13 +1030,21 @@ function ICalSection() {
         Mint a feed URL and paste it into Outlook, Google Calendar, or Apple Calendar. Public feeds
         expose only the public description; private feeds include internal notes and category names.
       </p>
+      {fresh && (
+        <FreshUrlBanner
+          title="Save this feed URL — it won't be shown again."
+          url={fresh.url}
+          subtitle={`${fresh.scope === "private" ? "Private" : "Public"} feed. We only store a hash of the token, so we can't show it to you later. Delete and recreate to rotate.`}
+          onDismiss={() => setFresh(null)}
+        />
+      )}
       <div className="flex flex-col gap-2">
         {(tokens.data ?? []).map((t) => (
           <div
             key={t.id}
             className="border-t border-subtle py-2 first:border-t-0 first:pt-0 flex flex-col gap-1"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span
                 className="pill"
                 style={{
@@ -1043,19 +1057,6 @@ function ICalSection() {
               <div className="flex-1" />
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={() => copy(t.feed_url)}
-                title={t.feed_url}
-              >
-                {copied === t.feed_url ? (
-                  <Check className="w-4 h-4" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-                {copied === t.feed_url ? "Copied" : "Copy URL"}
-              </button>
-              <button
-                type="button"
                 className="p-1 rounded hover:bg-hover text-[color:var(--color-danger)]"
                 onClick={() => {
                   if (confirm("Revoke this feed? Subscribers will start 404ing.")) del.mutate(t.id);
@@ -1065,10 +1066,16 @@ function ICalSection() {
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
-            <div className="text-[11px] text-muted font-mono truncate">{t.feed_url}</div>
+            <div className="text-[11px] text-muted">
+              Added {t.created_at.slice(0, 10)} ·{" "}
+              {t.last_used_at ? `last used ${t.last_used_at.slice(0, 10)}` : "never used"}
+            </div>
           </div>
         ))}
       </div>
+      <p className="text-[11px] text-muted mt-2">
+        URL is shown only at creation. To rotate a feed, delete it and create a new one.
+      </p>
       <div className="mt-3 flex flex-wrap gap-2 items-end">
         <div className="flex-1 min-w-[140px]">
           <label className="label">Feed label</label>
@@ -1083,7 +1090,15 @@ function ICalSection() {
           type="button"
           className="btn btn-secondary"
           onClick={() =>
-            create.mutate({ scope: "public", label }, { onSuccess: () => setLabel("") })
+            create.mutate(
+              { scope: "public", label },
+              {
+                onSuccess: (t) => {
+                  setLabel("");
+                  if (t.feed_url) setFresh({ id: t.id, url: t.feed_url, scope: t.scope });
+                },
+              },
+            )
           }
           disabled={create.isPending}
         >
@@ -1094,7 +1109,15 @@ function ICalSection() {
           type="button"
           className="btn btn-primary"
           onClick={() =>
-            create.mutate({ scope: "private", label }, { onSuccess: () => setLabel("") })
+            create.mutate(
+              { scope: "private", label },
+              {
+                onSuccess: (t) => {
+                  setLabel("");
+                  if (t.feed_url) setFresh({ id: t.id, url: t.feed_url, scope: t.scope });
+                },
+              },
+            )
           }
           disabled={create.isPending}
         >
@@ -1103,6 +1126,63 @@ function ICalSection() {
         </button>
       </div>
     </section>
+  );
+}
+
+/**
+ * One-shot banner shown above a list when the user just minted a token.
+ * Plain text URL, copy button, dismiss when they're done. Used by both the
+ * iCal feeds and share-links sections.
+ */
+function FreshUrlBanner({
+  title,
+  subtitle,
+  url,
+  onDismiss,
+}: {
+  title: string;
+  subtitle: string;
+  url: string;
+  onDismiss: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <div
+      className="mb-3 rounded border p-3 flex flex-col gap-2"
+      style={{
+        borderColor: "var(--color-warning)",
+        background: "color-mix(in srgb, var(--color-warning) 14%, transparent)",
+      }}
+      role="status"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle
+          className="w-4 h-4 mt-0.5 text-[color:var(--color-warning)] shrink-0"
+          aria-hidden="true"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-heading">{title}</div>
+          <div className="text-xs text-subtle mt-0.5">{subtitle}</div>
+        </div>
+      </div>
+      <div className="text-[11px] text-heading font-mono break-all bg-surface border border-subtle rounded p-2">
+        {url}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn btn-primary" onClick={copy}>
+          {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+          {copied ? "Copied" : "Copy URL"}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1116,22 +1196,19 @@ function ShareLinksSection() {
   const tokens = useShareTokens();
   const create = useCreateShareToken();
   const del = useDeleteShareToken();
-  const [copied, setCopied] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  function copy(url: string) {
-    navigator.clipboard.writeText(url);
-    setCopied(url);
-    setTimeout(() => setCopied(null), 1500);
-  }
+  const [fresh, setFresh] = useState<{ id: string; url: string; scope: string } | null>(null);
 
   function mint(scope: "current-year" | "all-years") {
     setError(null);
     create.mutate(
       { scope, label: label.trim() },
       {
-        onSuccess: () => setLabel(""),
+        onSuccess: (t) => {
+          setLabel("");
+          if (t.share_url) setFresh({ id: t.id, url: t.share_url, scope: t.scope });
+        },
         onError: (e) => setError((e as Error).message),
       },
     );
@@ -1147,6 +1224,15 @@ function ShareLinksSection() {
         into your time off. They see balances and bookings — not your private notes, not the
         cancelled-and-restored history. Revoke any time.
       </p>
+
+      {fresh && (
+        <FreshUrlBanner
+          title="Save this share URL — it won't be shown again."
+          url={fresh.url}
+          subtitle={`${fresh.scope === "all-years" ? "All-years" : "Current-year"} link. We only store a hash of the token, so we can't show it to you later. Delete and recreate to rotate.`}
+          onDismiss={() => setFresh(null)}
+        />
+      )}
 
       <div className="flex flex-col gap-2">
         {(tokens.data ?? []).map((t) => (
@@ -1172,19 +1258,6 @@ function ShareLinksSection() {
               <div className="flex-1" />
               <button
                 type="button"
-                className="btn btn-secondary"
-                onClick={() => copy(t.share_url)}
-                title={t.share_url}
-              >
-                {copied === t.share_url ? (
-                  <Check className="w-4 h-4" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-                {copied === t.share_url ? "Copied" : "Copy URL"}
-              </button>
-              <button
-                type="button"
                 className="p-1 rounded hover:bg-hover text-[color:var(--color-danger)]"
                 onClick={() => {
                   if (confirm("Revoke this share link? Whoever has it will start seeing a 404.")) {
@@ -1196,14 +1269,16 @@ function ShareLinksSection() {
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
-            {t.last_viewed_at && (
-              <div className="text-[11px] text-muted">
-                Last viewed {t.last_viewed_at.slice(0, 10)}
-              </div>
-            )}
+            <div className="text-[11px] text-muted">
+              Added {t.created_at.slice(0, 10)}
+              {t.last_viewed_at ? ` · last viewed ${t.last_viewed_at.slice(0, 10)}` : ""}
+            </div>
           </div>
         ))}
       </div>
+      <p className="text-[11px] text-muted mt-2">
+        URL is shown only at creation. To rotate a link, delete it and create a new one.
+      </p>
 
       <div className="mt-3 flex flex-wrap gap-2 items-end">
         <div className="flex-1 min-w-[160px]">
@@ -1239,6 +1314,353 @@ function ShareLinksSection() {
           {error}
         </div>
       )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Recovery codes — typeable backup codes for "I lost all my passkeys" days
+// ---------------------------------------------------------------------------
+function RecoveryCodesSection() {
+  const status = useRecoveryCodesStatus();
+  const regen = useRegenerateRecoveryCodes();
+  const [modalCodes, setModalCodes] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function generate() {
+    setError(null);
+    regen.mutate(undefined, {
+      onSuccess: (data) => setModalCodes(data.codes),
+      onError: (e) => setError((e as Error).message),
+    });
+  }
+
+  const generated = status.data?.generated ?? false;
+  const remaining = status.data?.remaining ?? 0;
+  const used = status.data?.used ?? 0;
+  const total = status.data?.total ?? 0;
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <LifeBuoy className="w-4 h-4" aria-hidden="true" /> Recovery codes
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        Typeable one-time codes to sign in if you lose every device with a passkey. Save them
+        somewhere safe — a password manager, a printed sheet in a drawer, anywhere that isn't this
+        browser. Each code works once.
+      </p>
+
+      {status.data && (
+        <div className="text-xs text-subtle mb-3">
+          {generated ? (
+            <>
+              <span className="text-heading font-semibold">{remaining}</span> of{" "}
+              <span className="text-heading font-semibold">{total}</span> remaining
+              {used > 0 && (
+                <>
+                  {" "}
+                  · <span className="text-heading">{used}</span> used
+                </>
+              )}
+            </>
+          ) : (
+            <>No codes generated yet.</>
+          )}
+        </div>
+      )}
+
+      <button
+        type="button"
+        className={generated ? "btn btn-secondary" : "btn btn-primary"}
+        onClick={generate}
+        disabled={regen.isPending}
+      >
+        <KeyRound className="w-4 h-4" aria-hidden="true" />
+        {regen.isPending
+          ? "Generating…"
+          : generated
+            ? "Regenerate codes"
+            : "Generate recovery codes"}
+      </button>
+      {generated && (
+        <p className="text-[11px] text-muted mt-2">
+          Regenerating wipes the old codes — any you've already saved will stop working.
+        </p>
+      )}
+      {error && (
+        <div role="alert" className="text-sm text-[color:var(--color-danger)] mt-2">
+          {error}
+        </div>
+      )}
+
+      <RecoveryCodesModal codes={modalCodes} onClose={() => setModalCodes(null)} />
+    </section>
+  );
+}
+
+/**
+ * Reusable modal that shows freshly-minted recovery codes. Used by both the
+ * Settings section and the first-run wizard. Codes are shown ONCE — there's
+ * no API to retrieve them later, so the dismiss button doubles as a
+ * "yes I've saved them" affirmation.
+ */
+export function RecoveryCodesModal({
+  codes,
+  onClose,
+  dismissLabel = "I've saved them",
+}: {
+  codes: string[] | null;
+  onClose: () => void;
+  dismissLabel?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  function copyAll() {
+    if (!codes) return;
+    navigator.clipboard.writeText(codes.join("\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  function downloadTxt() {
+    if (!codes) return;
+    const blob = new Blob([codes.join("\n") + "\n"], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "afk-recovery-codes.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <Modal
+      open={!!codes}
+      onClose={onClose}
+      title="Save your recovery codes"
+      size="md"
+      footer={
+        <button type="button" className="btn btn-primary" onClick={onClose}>
+          {dismissLabel}
+        </button>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <div
+          className="rounded border p-3 flex items-start gap-2"
+          style={{
+            borderColor: "var(--color-warning)",
+            background: "color-mix(in srgb, var(--color-warning) 14%, transparent)",
+          }}
+        >
+          <AlertTriangle
+            className="w-4 h-4 mt-0.5 text-[color:var(--color-warning)] shrink-0"
+            aria-hidden="true"
+          />
+          <div className="text-xs text-subtle">
+            <strong className="text-heading">These codes won't be shown again.</strong> We store
+            hashes only. If you lose them and lose your passkeys, your account is gone for good.
+          </div>
+        </div>
+        {codes && (
+          <div
+            className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-sm"
+            data-testid="recovery-codes"
+          >
+            {codes.map((c, i) => (
+              <div
+                key={c}
+                className="bg-surface-alt border border-subtle rounded px-2 py-1.5 text-heading"
+              >
+                <span className="text-muted text-[11px] mr-2">
+                  {(i + 1).toString().padStart(2, "0")}
+                </span>
+                {c}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2 mt-1">
+          <button type="button" className="btn btn-secondary" onClick={copyAll}>
+            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            {copied ? "Copied" : "Copy all"}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={downloadTxt}>
+            <Download className="w-4 h-4" /> Download as .txt
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Danger zone — irreversible account deletion. Three barriers between the
+// user and an "oh no" moment: (1) collapsed-by-default open-the-modal click,
+// (2) typing "DELETE MY ACCOUNT" verbatim, (3) a fresh passkey assertion.
+// ---------------------------------------------------------------------------
+function DangerZoneSection() {
+  const me = useMe();
+  const navigate = useNavigate();
+  const del = useDeleteAccount();
+  const [open, setOpen] = useState(false);
+  const [phrase, setPhrase] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const REQUIRED = "DELETE MY ACCOUNT";
+  const phraseOk = phrase === REQUIRED;
+
+  function reset() {
+    setPhrase("");
+    setError(null);
+    setBusy(false);
+  }
+
+  async function confirmDelete() {
+    if (!me.data || !phraseOk) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const assertion = await getPasskeyAssertion(me.data.username);
+      // SUPPRESS_AUTH dev mode: the worker still reads the body and validates
+      // the flow, so we shouldn't paper over it here. If the start endpoint
+      // short-circuited, surface that to the user.
+      if (assertion.suppressed) {
+        throw new Error("Account deletion is disabled in dev mode (SUPPRESS_AUTH).");
+      }
+      await del.mutateAsync({
+        flow_id: assertion.flow_id,
+        response: assertion.response,
+        confirm: REQUIRED,
+      });
+      navigate({ to: "/welcome", replace: true });
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section
+      className="card p-4"
+      style={{ borderColor: "color-mix(in srgb, var(--color-danger) 35%, var(--color-border))" }}
+    >
+      <h2 className="text-sm font-semibold text-heading mb-1 flex items-center gap-2">
+        <ShieldAlert className="w-4 h-4 text-[color:var(--color-danger)]" aria-hidden="true" />
+        Danger zone
+      </h2>
+      <p className="text-xs text-subtle mb-3">
+        Permanently delete your account and everything in it. This cannot be undone.
+      </p>
+      <button
+        type="button"
+        className="btn btn-danger"
+        onClick={() => {
+          reset();
+          setOpen(true);
+        }}
+      >
+        <Trash2 className="w-4 h-4" />
+        Delete account
+      </button>
+
+      <Modal
+        open={open}
+        onClose={() => {
+          if (busy) return;
+          setOpen(false);
+          reset();
+        }}
+        title="Delete your account?"
+        size="md"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setOpen(false);
+                reset();
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={confirmDelete}
+              disabled={!phraseOk || busy}
+            >
+              <Trash2 className="w-4 h-4" />
+              {busy ? "Deleting…" : "Confirm with passkey & delete"}
+            </button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <div
+            className="rounded border p-3 flex items-start gap-2"
+            style={{
+              borderColor: "var(--color-danger)",
+              background: "color-mix(in srgb, var(--color-danger) 12%, transparent)",
+            }}
+          >
+            <AlertTriangle
+              className="w-4 h-4 mt-0.5 text-[color:var(--color-danger)] shrink-0"
+              aria-hidden="true"
+            />
+            <div className="text-xs text-subtle">
+              <strong className="text-heading">This is irreversible.</strong> Once you confirm, your
+              data is wiped immediately. We don't keep backups you can restore from.
+            </div>
+          </div>
+
+          <div className="text-xs text-subtle">
+            We'll permanently delete:
+            <ul className="list-disc pl-5 mt-1 space-y-0.5">
+              <li>Your categories and yearly allowances</li>
+              <li>Every vacation you've ever booked, cancelled, or restored</li>
+              <li>Calendar feeds (iCal) and share links</li>
+              <li>Your manager / approval relationship and any pending approvals</li>
+              <li>Recovery codes, passkeys, and active sessions</li>
+              <li>The account itself — your username will be free to reuse</li>
+            </ul>
+          </div>
+
+          <div className="text-xs text-subtle">
+            Want a copy first? Use{" "}
+            <strong className="text-heading">Settings → Export your data</strong> to download
+            everything as JSON before continuing.
+          </div>
+
+          <div>
+            <label className="label" htmlFor="delete-phrase">
+              Type <span className="font-mono text-heading">DELETE MY ACCOUNT</span> to confirm
+            </label>
+            <input
+              id="delete-phrase"
+              className="input font-mono"
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value)}
+              placeholder="DELETE MY ACCOUNT"
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              disabled={busy}
+            />
+          </div>
+
+          {error && (
+            <div role="alert" className="text-sm text-[color:var(--color-danger)]">
+              {error}
+            </div>
+          )}
+        </div>
+      </Modal>
     </section>
   );
 }

@@ -485,6 +485,7 @@ function emptyUser(): import("../../shared/types.js").User {
     timezone: "UTC",
     created_at: "",
     last_login_at: null,
+    welcome_completed_at: null,
   };
 }
 function emptyBoss(): import("../../shared/types.js").BossRelationship {

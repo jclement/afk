@@ -33,6 +33,7 @@ import pdfRoutes from "./routes/pdf.js";
 import bossRoutes from "./routes/boss.js";
 import bossPublicRoutes from "./routes/boss-public.js";
 import { sharePublicApi, shareTokensApi } from "./routes/share.js";
+import recoveryRoutes from "./routes/recovery.js";
 
 const app = new Hono<HonoVars>();
 
@@ -126,6 +127,7 @@ app.route("/api/v1/pdf", pdfRoutes);
 app.route("/api/v1/boss", bossRoutes);
 app.route("/api/v1/share-tokens", shareTokensApi);
 app.route("/api/v1/share", sharePublicApi);
+app.route("/api/v1/recovery-codes", recoveryRoutes);
 app.route("/ical", feedApi);
 app.route("/verify-email", emailVerifyRoutes);
 // Public boss flow (consent + approve). HTML pages, no auth — magic link

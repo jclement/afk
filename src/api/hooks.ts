@@ -417,3 +417,80 @@ export function useDeleteShareToken() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["share-tokens"] }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Recovery codes — typeable backup codes for "I lost all my passkeys" days
+// ---------------------------------------------------------------------------
+
+export interface RecoveryCodesStatus {
+  total: number;
+  used: number;
+  remaining: number;
+  generated: boolean;
+}
+
+export function useRecoveryCodesStatus() {
+  return useQuery({
+    queryKey: ["recovery-codes"],
+    queryFn: () => api<RecoveryCodesStatus>(`${API_BASE}/recovery-codes`),
+  });
+}
+
+export function useRegenerateRecoveryCodes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<{ codes: string[] }>(`${API_BASE}/recovery-codes/regenerate`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["recovery-codes"] }),
+  });
+}
+
+/**
+ * Recovery-code login. Server sets the session cookie on success — client
+ * just needs to invalidate `["auth", "me"]` so the SPA picks up the new user.
+ */
+export function useRecoveryLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { username: string; code: string }) =>
+      api<{ user: User }>(`${API_BASE}/auth/login/recovery`, {
+        method: "POST",
+        json: body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Account deletion — irreversible, gated by passkey reauth + typed phrase
+// ---------------------------------------------------------------------------
+
+export function useDeleteAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { flow_id: string; response: unknown; confirm: string }) =>
+      api<{ deleted: true }>(`${API_BASE}/me/account`, {
+        method: "DELETE",
+        json: body,
+      }),
+    onSuccess: () => {
+      // Every cached query is about to 401 — drop them all and surface the
+      // signed-out state immediately. The /welcome redirect happens in the
+      // calling component.
+      qc.removeQueries();
+      qc.setQueryData(["auth", "me"], null);
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// First-run wizard
+// ---------------------------------------------------------------------------
+
+export function useMarkWelcomeCompleted() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<User>(`${API_BASE}/me/welcome-completed`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+  });
+}

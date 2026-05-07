@@ -42,6 +42,7 @@ export interface JsonExport {
     timezone: string;
     created_at: string;
     last_login_at: string | null;
+    welcome_completed_at: string | null;
   };
   categories: Category[];
   allowances: Allowance[];
@@ -96,6 +97,7 @@ export function buildJsonExport(input: {
       timezone: input.user.timezone,
       created_at: input.user.created_at,
       last_login_at: input.user.last_login_at,
+      welcome_completed_at: input.user.welcome_completed_at,
     },
     categories: input.categories,
     allowances: input.allowances,

@@ -131,23 +131,38 @@ users 1──* categories
 users 1──* allowances           (one per category-year pair)
 users 1──* vacations
 users 1──* ical_tokens
+users 1──* share_tokens
 users 1──* email_verifications  (in-flight verification links, 24h TTL)
+users 1──* recovery_codes       (10 one-time backup codes, hashed)
+users 1──1 boss_relationships   (optional)
 
 categories 1──* allowances
 categories 1──* vacations
+boss_relationships 1──* vacation_approvals (approval mode)
 ```
 
-| Table                 | Purpose                          | Notable columns                                                                               |
-| --------------------- | -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `users`               | Account record                   | `username`, `display_name`, `role`, `email`, `email_verified_at`, `timezone`, `last_login_at` |
-| `sessions`            | Active sessions                  | `id` (token), `expires_at`, `last_seen_at`                                                    |
-| `credentials`         | WebAuthn passkeys                | `id` (cred id), `public_key`, `counter`, `transports`, `nickname`                             |
-| `categories`          | User-defined categories          | `accrues`, `color`, `archived`, `sort_order`                                                  |
-| `allowances`          | Per-year, per-category budgets   | `year`, `days_allotted`, `days_carryover`, `notes`                                            |
-| `vacations`           | Entries                          | `start_date`, `end_date`, `partial_amount`, `cancelled_at`, `ical_sequence`                   |
-| `ical_tokens`         | Calendar feed tokens             | `scope` (`private`/`public`), `label`, `last_used_at`                                         |
-| `share_tokens`        | Read-only dashboard share links  | `scope` (`current-year`/`all-years`), `label`, `last_viewed_at`                               |
-| `email_verifications` | Pending email-verification links | `token` (32-byte hex), `email`, `expires_at` (24h)                                            |
+| Table                 | Purpose                          | Notable columns                                                                                                        |
+| --------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `users`               | Account record                   | `username`, `display_name`, `role`, `email`, `email_verified_at`, `timezone`, `last_login_at`, `welcome_completed_at`  |
+| `sessions`            | Active sessions                  | `id` (SHA-256 hash of cookie token), `expires_at`, `last_seen_at`                                                      |
+| `credentials`         | WebAuthn passkeys                | `id` (cred id), `public_key`, `counter`, `transports`, `nickname`                                                      |
+| `categories`          | User-defined categories          | `accrues`, `color`, `archived`, `sort_order`                                                                           |
+| `allowances`          | Per-year, per-category budgets   | `year`, `days_allotted`, `days_carryover`, `notes`                                                                     |
+| `vacations`           | Entries                          | `start_date`, `end_date`, `partial_amount`, `cancelled_at`, `ical_sequence`                                            |
+| `ical_tokens`         | Calendar feed tokens             | `scope` (`private`/`public`), `label`, `last_used_at`. Token column stores SHA-256 hash.                               |
+| `share_tokens`        | Read-only dashboard share links  | `scope` (`current-year`/`all-years`), `label`, `last_viewed_at`. Token column stores SHA-256 hash.                     |
+| `email_verifications` | Pending email-verification links | `token` (SHA-256 hash of plaintext), `email`, `expires_at` (24h)                                                       |
+| `recovery_codes`      | One-time backup codes            | `code_hash` (SHA-256 of normalised plaintext), `used_at` (NULL until consumed)                                         |
+| `boss_relationships`  | Optional manager / approver link | `boss_email`, `mode`, `consent_token` (hash), `unsubscribe_token` (plaintext, see below), `consented_at`, `revoked_at` |
+| `vacation_approvals`  | Per-vacation approval state      | `state`, `decision_token` (hash), `decided_at`, `decision_comment`                                                     |
+
+### Token storage at rest
+
+All long-lived bearer tokens are stored as **SHA-256 hashes** in D1, never plaintext. The plaintext exists only at the moment of delivery (in the cookie / URL / email body) and never round-trips through D1. A read-only DB compromise therefore yields no usable session, iCal feed, share link, email verification, recovery code, or boss consent / decision token — the attacker would have to pre-image SHA-256 to forge anything.
+
+The one exception is `boss_relationships.unsubscribe_token`, which stays plaintext. RFC 8058 List-Unsubscribe URLs ship in every email (including ones sent months ago) and the boss must be able to revoke from any of them; rotating on send would break old links, and we have no way to look up by hash without the plaintext. The leak surface for that one token is "manager unsubscribed without consent" — annoyance, not data exposure — which is an acceptable trade.
+
+The UX consequence: once an iCal feed or share link is created, the URL is shown **once** in the response and never recoverable. The list endpoints don't include the URL. To rotate, delete and recreate.
 
 ## Authentication Flow
 
@@ -173,6 +188,62 @@ as that user (otherwise anyone could attach a new passkey to a known account).
 2. Browser invokes `navigator.credentials.get()`.
 3. Browser POSTs `{flow_id, response}` to `/login/finish`. Worker verifies, updates the
    credential's counter, creates a session, sets the cookie.
+
+When the username is provided but unknown (or known with zero credentials), the worker still
+returns a **synthetic** `allowCredentials` entry so the response shape is identical to a known
+user's. /finish for the synthetic id fails the same way a wrong-passkey would — the attacker
+can't tell from outside whether the username exists.
+
+`/register/start` similarly does **not** short-circuit on a taken username. The conflict gate
+runs at `/register/finish`, which means each enumeration probe costs the attacker a complete
+WebAuthn ceremony, not a cheap HTTP call.
+
+### Recovery codes (passkey lockout fallback)
+
+Each user can mint **10 single-use recovery codes** in Settings (or via the first-run wizard).
+Format: `XXXX-XXXX-XXXX-XXXX` Crockford base32 (no I/L/O/U), ~80 bits per code. Plaintext is
+shown to the user **once**; D1 stores SHA-256 of the normalised (uppercase, no whitespace, no
+dashes) form.
+
+Login via `POST /api/v1/auth/login/recovery` with `{username, code}` consumes one code (atomic
+update with `WHERE used_at IS NULL`) and creates a session. Regeneration wipes the prior set.
+
+The login response after a recovery-code login includes a one-line nudge ("Add a new passkey
+in Settings to restore one-tap login"), shown via a `?recovery=1` search-param the dashboard
+reads and dismisses.
+
+### Logout
+
+`POST /api/v1/auth/logout` requires the `Origin` header to match the request origin. The SPA's
+own `fetch` always sets it; cross-site form auto-submissions don't. Without this guard, an
+attacker page could force-logout any victim with a session cookie (SameSite=Lax permits the
+top-level POST).
+
+### Account deletion
+
+`DELETE /api/v1/me/account` is a three-barrier flow:
+
+1. The user must already be authenticated.
+2. The body must include `confirm: "DELETE MY ACCOUNT"` (literal phrase).
+3. The body must include a fresh WebAuthn assertion `{flow_id, response}` for a credential that
+   belongs to the current user. The client runs the same login ceremony to mint these.
+
+On success, the worker explicitly deletes from every user-owned table (vacations →
+allowances → categories → ical_tokens → share_tokens → email_verifications →
+boss_relationships → recovery_codes → credentials → sessions → users) in topological order
+because `vacations.category_id` is `ON DELETE RESTRICT` and would otherwise block the cascade.
+Then it clears the cookie and returns. The UI redirects to `/welcome`.
+
+### First-run wizard
+
+`users.welcome_completed_at` is null for new accounts (and existing pre-migration users).
+The root component redirects signed-in users with a null flag from `/` to `/onboarding`. The
+wizard is a 7-step tour ending with a mandatory "save your recovery codes" step that uses the
+same `regenerateRecoveryCodes` flow + modal as Settings. `POST /api/v1/me/welcome-completed`
+sets the timestamp and the user lands on the dashboard.
+
+Settings, About, public share pages, and the wizard itself are reachable even when the flag is
+null — only `/` redirects. So the user can change their mind mid-wizard without being trapped.
 
 ### SUPPRESS_AUTH
 

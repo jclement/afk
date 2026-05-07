@@ -15,7 +15,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { HonoVars } from "../types.js";
-import { SESSION_COOKIE, getSession, touchSession } from "./sessions.js";
+import { SESSION_COOKIE, getSession, touchSessionById } from "./sessions.js";
 import { ensureDevUser, getUser } from "./users.js";
 import { err } from "./responses.js";
 
@@ -61,7 +61,7 @@ export const requireAuth: MiddlewareHandler<HonoVars> = async (c, next) => {
   }
   c.set("auth", { user, session_id: session.id });
   // Don't await — last_seen tracking is not request-critical.
-  c.executionCtx.waitUntil(touchSession(c.env.DB, session.id));
+  c.executionCtx.waitUntil(touchSessionById(c.env.DB, session.id));
   return next();
 };
 

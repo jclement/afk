@@ -26,6 +26,7 @@ const TITLES: Record<string, string> = {
   "/welcome": "AFK — Away From Keyboard",
   "/settings": "Settings · AFK",
   "/about": "About & privacy · AFK",
+  "/onboarding": "Welcome · AFK",
 };
 
 interface RouterContext {
@@ -65,6 +66,14 @@ function RootComponent() {
     // Already signed in → don't loiter on auth or marketing screens.
     if (me.data && (onAuthRoute || location.pathname === "/welcome")) {
       navigate({ to: "/", replace: true });
+      return;
+    }
+    // Signed-in users with an unfinished first-run wizard get nudged toward
+    // it from the dashboard. We don't trap them on every route — Settings
+    // and the About page stay reachable so they can change their mind, and
+    // /onboarding itself obviously must not redirect to itself.
+    if (me.data && me.data.welcome_completed_at === null && location.pathname === "/") {
+      navigate({ to: "/onboarding", replace: true });
       return;
     }
     if (onPublicRoute) return;

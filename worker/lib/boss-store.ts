@@ -13,7 +13,7 @@
  */
 
 import type { D1Database } from "@cloudflare/workers-types";
-import { newBossToken, newId } from "./ids.js";
+import { hashToken, newBossToken, newId } from "./ids.js";
 import type {
   ApprovalState,
   BossConsentStatus,
@@ -118,8 +118,16 @@ export async function upsertBoss(
   // Email or mode changed → reset consent and mint a new token. Rotate the
   // unsubscribe token too so a previously-known address (the manager being
   // replaced) can't revoke the freshly-pointed relationship.
+  //
+  // The consent token is hashed at rest (single-use, short-lived). The
+  // unsubscribe token stays plaintext: it's embedded in EVERY email's
+  // List-Unsubscribe header, including emails sent months ago, and we have
+  // no way to look it up after-the-fact without the plaintext. Worst-case
+  // leak is "manager gets unsubscribed without consent" (annoyance), not
+  // any user data crossing tenants — acceptable trade-off.
   const token = newBossToken();
   const unsubToken = newBossToken();
+  const tokenHash = await hashToken(token);
   const expires = new Date(Date.now() + CONSENT_TTL_MS).toISOString();
 
   if (existing) {
@@ -161,7 +169,7 @@ export async function upsertBoss(
                 unsubscribe_token = ?
           WHERE id = ?`,
       )
-      .bind(input.boss_email, input.mode, token, expires, unsubToken, existing.id)
+      .bind(input.boss_email, input.mode, tokenHash, expires, unsubToken, existing.id)
       .run();
   } else {
     await db
@@ -171,7 +179,7 @@ export async function upsertBoss(
             unsubscribe_token)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(newId(), userId, input.boss_email, input.mode, token, expires, unsubToken)
+      .bind(newId(), userId, input.boss_email, input.mode, tokenHash, expires, unsubToken)
       .run();
   }
 
@@ -192,6 +200,7 @@ export async function reissueConsentToken(
   if (!existing) return null;
   if (existing.consented_at && !existing.revoked_at) return null;
   const token = newBossToken();
+  const tokenHash = await hashToken(token);
   const expires = new Date(Date.now() + CONSENT_TTL_MS).toISOString();
   await db
     .prepare(
@@ -200,7 +209,7 @@ export async function reissueConsentToken(
               consented_at = NULL, revoked_at = NULL
         WHERE id = ?`,
     )
-    .bind(token, expires, existing.id)
+    .bind(tokenHash, expires, existing.id)
     .run();
   const after = await getBossRowByUser(db, userId);
   return { boss: rowToBoss(after!), consent_token: token };
@@ -215,9 +224,10 @@ export async function findBossByConsentToken(
   db: D1Database,
   token: string,
 ): Promise<BossRelationship | null> {
+  const tokenHash = await hashToken(token);
   const row = await db
     .prepare(`${SELECT_BOSS} WHERE consent_token = ?`)
-    .bind(token)
+    .bind(tokenHash)
     .first<BossRow>();
   if (!row) return null;
   if (
@@ -332,6 +342,7 @@ export async function findBossByUnsubscribeToken(
   db: D1Database,
   token: string,
 ): Promise<BossRelationship | null> {
+  // Stored plaintext — see the comment in upsertBoss for why.
   const row = await db
     .prepare(`${SELECT_BOSS} WHERE unsubscribe_token = ?`)
     .bind(token)
@@ -420,6 +431,7 @@ export async function createOrResetApproval(
   bossRelationshipId: string,
 ): Promise<{ approval: VacationApproval; decision_token: string }> {
   const token = newBossToken();
+  const tokenHash = await hashToken(token);
   const expires = new Date(Date.now() + APPROVAL_TTL_MS).toISOString();
   const existing = await db
     .prepare(`SELECT id FROM vacation_approvals WHERE vacation_id = ? AND boss_relationship_id = ?`)
@@ -434,7 +446,7 @@ export async function createOrResetApproval(
                 decided_at = NULL, decision_comment = NULL
           WHERE id = ?`,
       )
-      .bind(token, expires, existing.id)
+      .bind(tokenHash, expires, existing.id)
       .run();
   } else {
     await db
@@ -443,7 +455,7 @@ export async function createOrResetApproval(
            (id, vacation_id, boss_relationship_id, state, decision_token, decision_token_expires_at)
          VALUES (?, ?, ?, 'pending', ?, ?)`,
       )
-      .bind(newId(), vacationId, bossRelationshipId, token, expires)
+      .bind(newId(), vacationId, bossRelationshipId, tokenHash, expires)
       .run();
   }
   const row = await db
@@ -486,7 +498,7 @@ export async function findApprovalByToken(
           AND b.revoked_at IS NULL
           AND b.consented_at IS NOT NULL`,
     )
-    .bind(token)
+    .bind(await hashToken(token))
     .first<{
       a_id: string;
       a_vacation_id: string;

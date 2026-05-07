@@ -8,7 +8,7 @@
  */
 
 import type { D1Database } from "@cloudflare/workers-types";
-import { newId } from "./ids.js";
+import { hashToken, newId } from "./ids.js";
 import { CATEGORY_PALETTE, nextCategoryColor } from "../../shared/colors.js";
 import type {
   Allowance,
@@ -511,14 +511,14 @@ export async function deleteVacation(db: D1Database, userId: string, id: string)
 // iCal tokens
 // ---------------------------------------------------------------------------
 
-export async function listICalTokens(
-  db: D1Database,
-  userId: string,
-  origin: string,
-): Promise<ICalToken[]> {
+export async function listICalTokens(db: D1Database, userId: string): Promise<ICalToken[]> {
+  // We no longer have plaintext after token creation (D1 stores only the
+  // SHA-256 hash). The feed_url field is therefore omitted here — the UI
+  // shows it once at creation time and instructs the user to "delete and
+  // recreate to rotate." Identical pattern to API key UIs.
   const { results } = await db
     .prepare(
-      `SELECT id, scope, label, created_at, last_used_at, token
+      `SELECT id, scope, label, created_at, last_used_at
        FROM ical_tokens WHERE user_id = ? ORDER BY scope ASC, created_at ASC`,
     )
     .bind(userId)
@@ -528,7 +528,6 @@ export async function listICalTokens(
       label: string;
       created_at: string;
       last_used_at: string | null;
-      token: string;
     }>();
   return (results ?? []).map((r) => ({
     id: r.id,
@@ -536,7 +535,6 @@ export async function listICalTokens(
     label: r.label,
     created_at: r.created_at,
     last_used_at: r.last_used_at,
-    feed_url: `${origin}/ical/${r.token}.ics`,
   }));
 }
 
@@ -546,9 +544,10 @@ export async function createICalToken(
   input: { scope: "private" | "public"; label: string; token: string },
 ): Promise<{ id: string; token: string }> {
   const id = newId();
+  const tokenHash = await hashToken(input.token);
   await db
     .prepare(`INSERT INTO ical_tokens (id, user_id, token, scope, label) VALUES (?, ?, ?, ?, ?)`)
-    .bind(id, userId, input.token, input.scope, input.label)
+    .bind(id, userId, tokenHash, input.scope, input.label)
     .run();
   return { id, token: input.token };
 }
@@ -573,9 +572,10 @@ export async function findUserByICalToken(
   user_id: string;
   scope: "private" | "public";
 } | null> {
+  const tokenHash = await hashToken(token);
   const row = await db
     .prepare(`SELECT id AS token_id, user_id, scope FROM ical_tokens WHERE token = ?`)
-    .bind(token)
+    .bind(tokenHash)
     .first<{ token_id: string; user_id: string; scope: "private" | "public" }>();
   return row ?? null;
 }
@@ -606,25 +606,21 @@ interface ShareTokenRow {
   last_viewed_at: string | null;
 }
 
-export async function listShareTokens(
-  db: D1Database,
-  userId: string,
-  origin: string,
-): Promise<ShareToken[]> {
+export async function listShareTokens(db: D1Database, userId: string): Promise<ShareToken[]> {
+  // share_url is omitted — see listICalTokens for the rationale.
   const { results } = await db
     .prepare(
-      `SELECT id, user_id, token, label, scope, created_at, last_viewed_at
+      `SELECT id, user_id, label, scope, created_at, last_viewed_at
          FROM share_tokens WHERE user_id = ? ORDER BY created_at ASC`,
     )
     .bind(userId)
-    .all<ShareTokenRow>();
+    .all<Omit<ShareTokenRow, "token">>();
   return (results ?? []).map((r) => ({
     id: r.id,
     scope: r.scope,
     label: r.label,
     created_at: r.created_at,
     last_viewed_at: r.last_viewed_at,
-    share_url: `${origin}/share/${r.token}`,
   }));
 }
 
@@ -634,9 +630,10 @@ export async function createShareToken(
   input: { scope: ShareScope; label: string; token: string },
 ): Promise<{ id: string; token: string }> {
   const id = newId();
+  const tokenHash = await hashToken(input.token);
   await db
     .prepare(`INSERT INTO share_tokens (id, user_id, token, label, scope) VALUES (?, ?, ?, ?, ?)`)
-    .bind(id, userId, input.token, input.label, input.scope)
+    .bind(id, userId, tokenHash, input.label, input.scope)
     .run();
   return { id, token: input.token };
 }
@@ -658,9 +655,10 @@ export async function findUserByShareToken(
   db: D1Database,
   token: string,
 ): Promise<{ token_id: string; user_id: string; scope: ShareScope } | null> {
+  const tokenHash = await hashToken(token);
   const row = await db
     .prepare(`SELECT id AS token_id, user_id, scope FROM share_tokens WHERE token = ?`)
-    .bind(token)
+    .bind(tokenHash)
     .first<{ token_id: string; user_id: string; scope: ShareScope }>();
   return row ?? null;
 }

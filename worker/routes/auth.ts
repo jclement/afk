@@ -23,6 +23,7 @@ import type { HonoVars } from "../types.js";
 import { isAuthSuppressed, requireAuth } from "../lib/auth.js";
 import { err, ok } from "../lib/responses.js";
 import { createUser, ensureDevUser, getUser, getUserByUsername, userCount } from "../lib/users.js";
+import { consumeRecoveryCode } from "../lib/recovery.js";
 import {
   AuthError,
   finishAuthentication,
@@ -158,10 +159,17 @@ auth.post("/register/start", async (c) => {
 
   const existing = await getUserByUsername(c.env.DB, username);
   const requester = await currentUserFromCookie(c);
-  const guard = await assertRegistrationAllowed(c, existing, requester);
-  if (guard) return guard;
+  const isSelfAddingPasskey = existing && requester && requester.id === existing.id;
 
-  const excludeIds = existing ? await listCredentialIds(c.env.DB, existing.id) : [];
+  // Username-enumeration flattening (H3): we DON'T short-circuit when the
+  // username is taken by someone other than the requester. Returning CONFLICT
+  // here would let an attacker probe usernames cheaply (one HTTP call each).
+  // Instead, we always continue into the WebAuthn ceremony with empty
+  // excludeIds, and assertRegistrationAllowed runs at /finish — so each probe
+  // costs the attacker a full WebAuthn ceremony with their own authenticator.
+  // The legitimate "I'm authenticated as this user, adding a passkey" flow
+  // still gets real excludeIds so their authenticator can refuse duplicates.
+  const excludeIds = isSelfAddingPasskey ? await listCredentialIds(c.env.DB, existing.id) : [];
 
   try {
     const result = await startRegistration(
@@ -245,7 +253,7 @@ auth.post("/register/finish", async (c) => {
       c.req.header("user-agent") ?? null,
       c.req.header("cf-connecting-ip") ?? null,
     );
-    setSessionCookie(c, session.id, isLocalhost(c));
+    setSessionCookie(c, session.token, isLocalhost(c));
     return ok(c, { user });
   } catch (e) {
     if (e instanceof AuthError) {
@@ -270,7 +278,22 @@ auth.post("/login/start", async (c) => {
 
   const body = await c.req.json<{ username?: string }>().catch(() => ({}) as { username?: string });
   const username = body.username?.trim().toLowerCase() || null;
-  const allowed = username ? await listAllCredentialsForUsername(c.env.DB, username) : [];
+  let allowed = username ? await listAllCredentialsForUsername(c.env.DB, username) : [];
+  // Username-enumeration flattening (H3): when the username is provided but
+  // unknown (or known with zero credentials), we still ship a synthetic
+  // credential id so the response shape doesn't differ from a known user's.
+  // The synthetic id won't verify at /login/finish because no credentials row
+  // exists for it — the failure is indistinguishable from a wrong-passkey
+  // failure for a real user.
+  if (username && allowed.length === 0) {
+    const fake = new Uint8Array(64);
+    crypto.getRandomValues(fake);
+    const b64 = btoa(String.fromCharCode(...fake))
+      .replace(/=+$/, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+    allowed = [{ id: b64, transports: null }];
+  }
   try {
     const result = await startAuthentication(
       c.env.KV,
@@ -315,7 +338,7 @@ auth.post("/login/finish", async (c) => {
       c.req.header("user-agent") ?? null,
       c.req.header("cf-connecting-ip") ?? null,
     );
-    setSessionCookie(c, session.id, isLocalhost(c));
+    setSessionCookie(c, session.token, isLocalhost(c));
     return ok(c, { user });
   } catch (e) {
     if (e instanceof AuthError) {
@@ -326,7 +349,62 @@ auth.post("/login/finish", async (c) => {
   }
 });
 
+/**
+ * Recovery-code login — fallback when every passkey is lost. The code is
+ * single-use; on success a session is created and the user lands on the
+ * dashboard. The UI nudges them to register a new passkey immediately so
+ * they're back to passkey-primary.
+ *
+ * Tradeoffs: typeable codes are phishable in a way passkeys aren't. The
+ * mitigations are (a) one-time use, (b) 80-bit entropy per code, (c) only
+ * 10 per user — total search space against any one user is 10 * 2^80.
+ */
+auth.post("/login/recovery", async (c) => {
+  if (isAuthSuppressed(c)) {
+    const dev = await ensureDevUser(c.env.DB);
+    return ok(c, { user: dev });
+  }
+  const body = await c.req
+    .json<{ username?: string; code?: string }>()
+    .catch(() => ({}) as { username?: string; code?: string });
+  const username = (body.username ?? "").trim().toLowerCase();
+  const code = (body.code ?? "").trim();
+  if (!username || !code) {
+    return err(c, "VALIDATION_ERROR", "Username and recovery code are required.");
+  }
+  const user = await getUserByUsername(c.env.DB, username);
+  // Same generic error for "no such user" and "wrong code" so an attacker
+  // can't tell the two apart by response — username enumeration would
+  // otherwise reappear via this endpoint.
+  if (!user) {
+    return err(c, "UNAUTHORIZED", "Invalid recovery code.");
+  }
+  const consumed = await consumeRecoveryCode(c.env.DB, user.id, code);
+  if (!consumed) {
+    return err(c, "UNAUTHORIZED", "Invalid recovery code.");
+  }
+  const session = await createSession(
+    c.env.DB,
+    user.id,
+    c.req.header("user-agent") ?? null,
+    c.req.header("cf-connecting-ip") ?? null,
+  );
+  setSessionCookie(c, session.token, isLocalhost(c));
+  return ok(c, { user });
+});
+
 auth.post("/logout", async (c) => {
+  // Origin-pin (H4): logout is unauthenticated by design (so a stale cookie
+  // can be cleared without 401), but a cross-site form auto-submit could
+  // otherwise force-logout any victim with the right cookie path/SameSite
+  // combo. SameSite=Lax allows top-level POST navigations, and that's enough
+  // to trigger this. Reject any logout whose Origin doesn't match the request
+  // host. The SPA's own fetch() always sets Origin correctly.
+  const sentOrigin = c.req.header("origin");
+  const requestOrigin = new URL(c.req.url).origin;
+  if (!sentOrigin || sentOrigin !== requestOrigin) {
+    return err(c, "FORBIDDEN", "Cross-origin logout rejected.");
+  }
   // Don't gate on requireAuth — logout should be a no-op-friendly endpoint
   // even with an expired/invalid cookie. But we MUST destroy the server-side
   // session row, otherwise a leaked cookie remains valid for its 30-day TTL.

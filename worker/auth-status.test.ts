@@ -29,11 +29,21 @@ describe("auth status + me", () => {
     const { cookie } = await createTestSession();
     const res = await unauthedFetch("/api/v1/auth/logout", {
       method: "POST",
-      headers: { Cookie: cookie },
+      // Origin matches the test base URL so the same-origin guard passes.
+      headers: { Cookie: cookie, Origin: "http://localhost" },
     });
     expect(res.status).toBe(200);
     const setCookie = res.headers.get("set-cookie") ?? "";
     expect(setCookie).toMatch(/afk_session=/);
     expect(setCookie).toMatch(/Max-Age=0|Expires=/i);
+  });
+
+  it("logout rejects cross-origin POST", async () => {
+    const { cookie } = await createTestSession();
+    const res = await unauthedFetch("/api/v1/auth/logout", {
+      method: "POST",
+      headers: { Cookie: cookie, Origin: "https://attacker.example.com" },
+    });
+    expect(res.status).toBe(403);
   });
 });
