@@ -344,7 +344,11 @@ function DoneStep() {
       <p className="text-sm text-subtle leading-relaxed">A few quick wins for day one:</p>
       <ul className="text-sm text-subtle list-disc pl-5 space-y-1">
         <li>Set this year's allowance in Settings → Categories.</li>
-        <li>Verify your email so AFK can mail you calendar invites.</li>
+        <li>
+          Verify your email — every booking arrives in your inbox as a real calendar invite that
+          Outlook / Gmail / Apple Calendar add automatically, and edits or cancellations re-fire so
+          your calendar always matches what's in AFK.
+        </li>
         <li>Add a passkey on a second device while you're thinking about it.</li>
       </ul>
       <div className="flex items-center gap-2 mt-2">
