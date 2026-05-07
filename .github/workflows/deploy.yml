@@ -99,7 +99,7 @@ jobs:
           if [ "${{ steps.target.outputs.target }}" = "production" ]; then
             url="https://afk.onewheelgeek.net/api/v1/health"
           else
-            url="https://afk-test.${{ secrets.CLOUDFLARE_WORKERS_DEV_SUBDOMAIN }}.workers.dev/api/v1/health"
+            url="https://afk-test.jeffrey-clement.workers.dev/api/v1/health"
           fi
           for i in 1 2 3 4 5; do
             if curl --fail --silent --show-error "$url" | tee /tmp/health.json | grep -q '"status":"ok"'; then
