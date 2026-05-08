@@ -19,7 +19,10 @@
  * diagnosable from `wrangler tail` without leaking the actual URL path
  * (which can carry a token).
  */
-export function isSameOrigin(c: { req: { header(name: string): string | undefined; url: string } }, tag: string): boolean {
+export function isSameOrigin(
+  c: { req: { header(name: string): string | undefined; url: string } },
+  tag: string,
+): boolean {
   const fetchSite = c.req.header("sec-fetch-site");
   if (fetchSite) {
     if (fetchSite === "same-origin") return true;
