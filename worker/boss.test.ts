@@ -296,6 +296,55 @@ describe("boss consent flow", () => {
       ).status,
     ).toBe(404);
   });
+
+  it("CSRF: rejects POST with Sec-Fetch-Site: cross-site", async () => {
+    const { cookie, userId } = await setupUserWithEmail();
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", mode: "notify" },
+    });
+    const token = await fetchTokenFromDb(userId);
+    const res = await unauthedFetch(`/boss/consent/${token}`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("CSRF: accepts POST with Sec-Fetch-Site: same-origin even when Origin disagrees", async () => {
+    // Cloudflare custom-domain edge cases can produce a logical-same-origin
+    // POST whose `Origin` header doesn't string-equal `request.url`. The
+    // Sec-Fetch-Site signal is the browser's own declaration and should
+    // override the brittle Origin comparison.
+    const { cookie, userId } = await setupUserWithEmail();
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", mode: "notify" },
+    });
+    const token = await fetchTokenFromDb(userId);
+    const res = await unauthedFetch(`/boss/consent/${token}`, {
+      method: "POST",
+      headers: {
+        "sec-fetch-site": "same-origin",
+        origin: "https://some-other-host.example",
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("CSRF (legacy fallback): rejects POST when Origin disagrees and no Sec-Fetch-Site", async () => {
+    const { cookie, userId } = await setupUserWithEmail();
+    await authedFetch(cookie, "/api/v1/boss", {
+      method: "PUT",
+      json: { boss_email: "g@e.com", mode: "notify" },
+    });
+    const token = await fetchTokenFromDb(userId);
+    const res = await unauthedFetch(`/boss/consent/${token}`, {
+      method: "POST",
+      headers: { origin: "https://attacker.example" },
+    });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("boss unsubscribe flow", () => {

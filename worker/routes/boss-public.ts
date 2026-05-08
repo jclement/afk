@@ -46,6 +46,7 @@ import {
   sendDecisionReceiptToUser,
 } from "../lib/boss-emails.js";
 import { sendVacationLifecycleEmail } from "../lib/vacation-emails.js";
+import { isSameOrigin } from "../lib/csrf.js";
 import {
   categoryUsage,
   vacationDayCostInYear,
@@ -66,18 +67,13 @@ function bossHtml(html: string, status: number = 200): Response {
 /**
  * CSRF guard for boss POST endpoints. The token in the URL is the auth, but
  * the URL leaks in many ways (link-preview bots, corporate URL-rewriters,
- * server logs at the boss's mail gateway, accidental forwards). Without
- * Origin-pinning, a manager who clicks an attacker's page could POST a
- * cross-site form whose action is `/boss/approve/<leaked-token>`.
- *
- * Behaviour: when the Origin header is present, it must match the request
- * origin. When absent, allow — Outlook desktop / corporate gateways and
- * RFC 8058 one-click unsubscribe POSTs sometimes send no Origin.
+ * server logs at the boss's mail gateway, accidental forwards). Without a
+ * same-origin guard, a manager who clicks an attacker's page could POST a
+ * cross-site form whose action is `/boss/approve/<leaked-token>`. See
+ * `lib/csrf.ts` for the shared implementation.
  */
 function checkOrigin(c: import("hono").Context<HonoVars>): boolean {
-  const sent = c.req.header("origin");
-  if (!sent) return true;
-  return sent === new URL(c.req.url).origin;
+  return isSameOrigin(c, "boss");
 }
 
 // ---------------------------------------------------------------------------

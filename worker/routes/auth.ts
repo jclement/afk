@@ -21,6 +21,7 @@ import { getCookie } from "hono/cookie";
 import type { Context } from "hono";
 import type { HonoVars } from "../types.js";
 import { isAuthSuppressed, requireAuth } from "../lib/auth.js";
+import { isSameOrigin } from "../lib/csrf.js";
 import { err, ok } from "../lib/responses.js";
 import { createUser, ensureDevUser, getUser, getUserByUsername, userCount } from "../lib/users.js";
 import { consumeRecoveryCode } from "../lib/recovery.js";
@@ -398,11 +399,8 @@ auth.post("/logout", async (c) => {
   // can be cleared without 401), but a cross-site form auto-submit could
   // otherwise force-logout any victim with the right cookie path/SameSite
   // combo. SameSite=Lax allows top-level POST navigations, and that's enough
-  // to trigger this. Reject any logout whose Origin doesn't match the request
-  // host. The SPA's own fetch() always sets Origin correctly.
-  const sentOrigin = c.req.header("origin");
-  const requestOrigin = new URL(c.req.url).origin;
-  if (!sentOrigin || sentOrigin !== requestOrigin) {
+  // to trigger this. See `lib/csrf.ts` for the shared same-origin guard.
+  if (!isSameOrigin(c, "logout")) {
     return err(c, "FORBIDDEN", "Cross-origin logout rejected.");
   }
   // Don't gate on requireAuth — logout should be a no-op-friendly endpoint
