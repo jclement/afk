@@ -40,7 +40,7 @@ import {
   renderEmail,
 } from "./email-template.js";
 import { buildInviteIcs, inviteSummary } from "./ical-invite.js";
-import { sendCalendarInvite, sendPlainEmail } from "./mailgun.js";
+import { sendCalendarInvite, sendPlainEmail, type SendResult } from "./mailgun.js";
 
 /**
  * Send the consent request — the very first email a boss receives when a
@@ -128,7 +128,7 @@ export async function sendBossNotifyInvite(opts: {
   /** Per-relationship unsubscribe token — embedded in the footer + RFC 8058
    *  List-Unsubscribe header so the manager can opt out in one click. */
   unsubscribeToken: string;
-}): Promise<void> {
+}): Promise<SendResult> {
   const { env, appOrigin, user, boss, vacation, category, method, status, unsubscribeToken } = opts;
   const unsubUrl = `${appOrigin}/boss/unsubscribe/${unsubscribeToken}`;
   const organizerEmail = env.MAILGUN_FROM
@@ -219,7 +219,7 @@ export async function sendBossNotifyInvite(opts: {
     footer: revokeFooterHtml(appOrigin, unsubUrl, user),
   });
 
-  await sendCalendarInvite(env, {
+  return await sendCalendarInvite(env, {
     to: boss.boss_email,
     replyTo: user.email ?? undefined,
     subject,
@@ -250,7 +250,7 @@ export async function sendBossApprovalRequest(opts: {
   /** Per-relationship unsubscribe token — embedded in the footer + RFC 8058
    *  List-Unsubscribe header so the manager can opt out in one click. */
   unsubscribeToken: string;
-}): Promise<void> {
+}): Promise<SendResult> {
   const {
     env,
     appOrigin,
@@ -326,7 +326,7 @@ export async function sendBossApprovalRequest(opts: {
     footer: revokeFooterHtml(appOrigin, unsubUrl, user),
   });
 
-  await sendPlainEmail(env, {
+  return await sendPlainEmail(env, {
     to: boss.boss_email,
     subject,
     text,

@@ -4,8 +4,13 @@
  * the helper checks whether the user has a verified email and, if so, asks
  * Mailgun to send the appropriate METHOD:PUBLISH or METHOD:CANCEL email.
  *
- * Sending failures are caught and logged but never propagated — the user's
- * vacation save shouldn't fail because their inbox is on fire.
+ * Errors propagate. Callers wrap with try/catch so they can record a
+ * delivery-log entry either way (success → message id, failure → message)
+ * — we used to swallow inside and lose that signal entirely.
+ *
+ * Returns `{ skipped: true }` when the user has no verified email (no send
+ * was attempted) and `{ method, ... }` otherwise so the caller knows what
+ * METHOD was emitted.
  *
  * Subject + event title are `{Category} — {public_desc}`. Body is the
  * personal notes (internal_desc) rendered as markdown in the HTML
@@ -27,9 +32,13 @@ import {
 } from "./email-template.js";
 import { buildInviteIcs, inviteSummary } from "./ical-invite.js";
 import { renderMarkdown } from "./markdown.js";
-import { sendCalendarInvite } from "./mailgun.js";
+import { sendCalendarInvite, type SendResult } from "./mailgun.js";
 
 export type VacationLifecycle = "created" | "updated" | "cancelled" | "uncancelled" | "deleted";
+
+export interface VacationLifecycleSendResult extends SendResult {
+  method: "PUBLISH" | "CANCEL";
+}
 
 export async function sendVacationLifecycleEmail(
   env: Env,
@@ -38,8 +47,8 @@ export async function sendVacationLifecycleEmail(
   vacation: Vacation,
   category: Category | null,
   lifecycle: VacationLifecycle,
-): Promise<void> {
-  if (!user.email || !user.email_verified_at) return;
+): Promise<VacationLifecycleSendResult | { skipped: true; reason: "no_email" }> {
+  if (!user.email || !user.email_verified_at) return { skipped: true, reason: "no_email" };
   const method: "PUBLISH" | "CANCEL" =
     lifecycle === "cancelled" || lifecycle === "deleted" ? "CANCEL" : "PUBLISH";
 
@@ -73,18 +82,15 @@ export async function sendVacationLifecycleEmail(
   const text = plainBodyFor(method, vacation, category);
   const html = htmlBodyFor(method, vacation, category, status);
 
-  try {
-    await sendCalendarInvite(env, {
-      to: user.email,
-      subject,
-      text,
-      html,
-      ics,
-      method,
-    });
-  } catch (e) {
-    console.error("[vacation-emails] send failed:", (e as Error).message);
-  }
+  const res = await sendCalendarInvite(env, {
+    to: user.email,
+    subject,
+    text,
+    html,
+    ics,
+    method,
+  });
+  return { ...res, method };
 }
 
 function subjectFor(method: "PUBLISH" | "CANCEL", v: Vacation, cat: Category | null): string {

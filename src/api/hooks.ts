@@ -21,6 +21,7 @@ import type {
   ShareToken,
   User,
   Vacation,
+  VacationEmailLog,
 } from "@shared/types";
 
 // ---------------------------------------------------------------------------
@@ -285,6 +286,50 @@ export function useDeleteVacation(_year: number) {
   return useMutation({
     mutationFn: (id: string) => api(`${API_BASE}/vacations/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["summary"] }),
+  });
+}
+
+// Vacation email log — manual resend + audit trail. Enabled-by-id pattern
+// so the modal mounts and triggers the fetch only when the user opens it.
+
+export function useVacationEmailLog(vacationId: string | null) {
+  return useQuery<VacationEmailLog[]>({
+    queryKey: ["vacation-email-log", vacationId],
+    queryFn: () => api<VacationEmailLog[]>(`${API_BASE}/vacations/${vacationId}/email-log`),
+    enabled: !!vacationId,
+    // Stale on focus — the lifecycle path may have written rows in another tab.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Per-recipient send result the resend endpoint returns. Mirrors the worker
+ * `DispatchResult` shape minus the wire types; we keep `skipped`/`error` so
+ * the UI can render a meaningful per-target outcome instead of a flat
+ * "success".
+ */
+export interface VacationEmailResendResult {
+  skipped?: boolean;
+  skip_reason?: "no_user_email";
+  mailgun_message_id?: string;
+  error?: string;
+  recipient: "self" | "boss";
+  kind: "lifecycle" | "notify_invite" | "approval_request";
+  method: "PUBLISH" | "CANCEL" | null;
+}
+
+export function useResendVacationEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, to }: { id: string; to: "self" | "boss" | "both" }) =>
+      api<{ results: VacationEmailResendResult[]; log: VacationEmailLog[] }>(
+        `${API_BASE}/vacations/${id}/resend`,
+        { method: "POST", json: { to } },
+      ),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["vacation-email-log", vars.id] });
+    },
   });
 }
 

@@ -28,6 +28,8 @@ import migration0007 from "../migrations/0007_share_tokens.sql?raw";
 import migration0008 from "../migrations/0008_boss_unsubscribe_token.sql?raw";
 // @ts-expect-error vite raw imports aren't part of the worker tsconfig
 import migration0009 from "../migrations/0009_hash_tokens_and_recovery.sql?raw";
+// @ts-expect-error vite raw imports aren't part of the worker tsconfig
+import migration0010 from "../migrations/0010_vacation_email_log.sql?raw";
 import app from "./index.js";
 import type { Env } from "./types.js";
 import { createSession } from "./lib/sessions.js";
@@ -40,6 +42,7 @@ export { app };
 /** Fresh schema in the in-memory D1 instance — call from beforeEach. */
 export async function applyMigrations(): Promise<void> {
   const dropTables = [
+    "vacation_email_log",
     "recovery_codes",
     "share_tokens",
     "vacation_approvals",
@@ -70,6 +73,7 @@ export async function applyMigrations(): Promise<void> {
     migration0007 as string,
     migration0008 as string,
     migration0009 as string,
+    migration0010 as string,
   ]) {
     const cleaned = sql
       .split("\n")

@@ -201,6 +201,29 @@ export interface VacationApproval {
   created_at: string;
 }
 
+/**
+ * One row per attempted vacation-related email send. Powers the support /
+ * UX answer to "did the manager actually get this?" — historically a
+ * waitUntil-plus-console.error blind spot.
+ *
+ * `recipient` is the logical target (self or boss); `kind` names the
+ * template; `method` is the iCalendar METHOD when applicable;
+ * `mailgun_message_id` is populated only on successful Mailgun acceptance;
+ * `error` is populated only on failure; `resend` distinguishes a manual
+ * /resend click from the automatic lifecycle path.
+ */
+export interface VacationEmailLog {
+  id: string;
+  vacation_id: string;
+  recipient: "self" | "boss";
+  kind: "lifecycle" | "notify_invite" | "approval_request";
+  method: "PUBLISH" | "CANCEL" | null;
+  resend: boolean;
+  mailgun_message_id: string | null;
+  error: string | null;
+  sent_at: string;
+}
+
 export interface ApiError {
   error: { message: string; code: string };
 }

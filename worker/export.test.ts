@@ -85,6 +85,7 @@ describe("data export", () => {
       expect(Array.isArray(body.vacations)).toBe(true);
       expect(Array.isArray(body.share_tokens)).toBe(true);
       expect(Array.isArray(body.vacation_approvals)).toBe(true);
+      expect(Array.isArray(body.vacation_email_log)).toBe(true);
       // `boss` field is present in the response shape (null when no
       // relationship). Detailed boss-export coverage lives in boss.test.ts.
       expect("boss" in body).toBe(true);

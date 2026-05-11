@@ -135,26 +135,29 @@ users 1──* share_tokens
 users 1──* email_verifications  (in-flight verification links, 24h TTL)
 users 1──* recovery_codes       (10 one-time backup codes, hashed)
 users 1──1 boss_relationships   (optional)
+users 1──* vacation_email_log   (delivery audit, also FK'd to vacations)
 
 categories 1──* allowances
 categories 1──* vacations
+vacations 1──* vacation_email_log
 boss_relationships 1──* vacation_approvals (approval mode)
 ```
 
-| Table                 | Purpose                          | Notable columns                                                                                                        |
-| --------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `users`               | Account record                   | `username`, `display_name`, `role`, `email`, `email_verified_at`, `timezone`, `last_login_at`, `welcome_completed_at`  |
-| `sessions`            | Active sessions                  | `id` (SHA-256 hash of cookie token), `expires_at`, `last_seen_at`                                                      |
-| `credentials`         | WebAuthn passkeys                | `id` (cred id), `public_key`, `counter`, `transports`, `nickname`                                                      |
-| `categories`          | User-defined categories          | `accrues`, `color`, `archived`, `sort_order`                                                                           |
-| `allowances`          | Per-year, per-category budgets   | `year`, `days_allotted`, `days_carryover`, `notes`                                                                     |
-| `vacations`           | Entries                          | `start_date`, `end_date`, `partial_amount`, `cancelled_at`, `ical_sequence`                                            |
-| `ical_tokens`         | Calendar feed tokens             | `scope` (`private`/`public`), `label`, `last_used_at`. Token column stores SHA-256 hash.                               |
-| `share_tokens`        | Read-only dashboard share links  | `scope` (`current-year`/`all-years`), `label`, `last_viewed_at`. Token column stores SHA-256 hash.                     |
-| `email_verifications` | Pending email-verification links | `token` (SHA-256 hash of plaintext), `email`, `expires_at` (24h)                                                       |
-| `recovery_codes`      | One-time backup codes            | `code_hash` (SHA-256 of normalised plaintext), `used_at` (NULL until consumed)                                         |
-| `boss_relationships`  | Optional manager / approver link | `boss_email`, `mode`, `consent_token` (hash), `unsubscribe_token` (plaintext, see below), `consented_at`, `revoked_at` |
-| `vacation_approvals`  | Per-vacation approval state      | `state`, `decision_token` (hash), `decided_at`, `decision_comment`                                                     |
+| Table                 | Purpose                          | Notable columns                                                                                                                                    |
+| --------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`               | Account record                   | `username`, `display_name`, `role`, `email`, `email_verified_at`, `timezone`, `last_login_at`, `welcome_completed_at`                              |
+| `sessions`            | Active sessions                  | `id` (SHA-256 hash of cookie token), `expires_at`, `last_seen_at`                                                                                  |
+| `credentials`         | WebAuthn passkeys                | `id` (cred id), `public_key`, `counter`, `transports`, `nickname`                                                                                  |
+| `categories`          | User-defined categories          | `accrues`, `color`, `archived`, `sort_order`                                                                                                       |
+| `allowances`          | Per-year, per-category budgets   | `year`, `days_allotted`, `days_carryover`, `notes`                                                                                                 |
+| `vacations`           | Entries                          | `start_date`, `end_date`, `partial_amount`, `cancelled_at`, `ical_sequence`                                                                        |
+| `ical_tokens`         | Calendar feed tokens             | `scope` (`private`/`public`), `label`, `last_used_at`. Token column stores SHA-256 hash.                                                           |
+| `share_tokens`        | Read-only dashboard share links  | `scope` (`current-year`/`all-years`), `label`, `last_viewed_at`. Token column stores SHA-256 hash.                                                 |
+| `email_verifications` | Pending email-verification links | `token` (SHA-256 hash of plaintext), `email`, `expires_at` (24h)                                                                                   |
+| `recovery_codes`      | One-time backup codes            | `code_hash` (SHA-256 of normalised plaintext), `used_at` (NULL until consumed)                                                                     |
+| `boss_relationships`  | Optional manager / approver link | `boss_email`, `mode`, `consent_token` (hash), `unsubscribe_token` (plaintext, see below), `consented_at`, `revoked_at`                             |
+| `vacation_approvals`  | Per-vacation approval state      | `state`, `decision_token` (hash), `decided_at`, `decision_comment`                                                                                 |
+| `vacation_email_log`  | Per-send audit row               | `recipient` (`self`/`boss`), `kind` (`lifecycle`/`notify_invite`/`approval_request`), `method`, `resend`, `mailgun_message_id`, `error`, `sent_at` |
 
 ### Token storage at rest
 
@@ -323,6 +326,21 @@ request / decision receipt) ship a polished HTML alternative built from
 Mail strip `<style>` blocks, so the helpers (`renderEmail`, `metaTable`, `button`,
 `notesBlock`, `badge`) emit only inline-styled HTML. Plain-text bodies are still sent as the
 fallback alternative for spam-filter scoring and bare clients.
+
+### Delivery log + manual resend
+
+Every vacation-related send goes through `worker/lib/email-dispatch.ts`, which wraps the
+Mailgun call in a try/catch, captures the returned message id on success and the error
+message on failure, and records one row per attempt in `vacation_email_log`. The lifecycle
+path (create / update / cancel / uncancel / delete) and the manual `/resend` endpoint share
+the same dispatchers, so the audit covers automatic and user-pulled sends alike. Failures
+no longer disappear into stdout: `GET /api/v1/vacations/:id/email-log` surfaces them in the
+UI, and `POST /api/v1/vacations/:id/resend` lets the user replay an invite to themselves,
+their manager, or both when something went sideways (corporate spam filter, transient
+Mailgun 5xx, missing `.ics` attachment in their mail client). When the target is the boss
+and the boss is in approval mode + the vacation is still `pending`, the resend re-mints a
+fresh decision token via `createOrResetApproval` and invalidates the prior magic link —
+same one-shot semantics as the original send.
 
 ## Data export
 

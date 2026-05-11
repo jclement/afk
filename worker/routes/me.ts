@@ -36,6 +36,7 @@ import {
   listShareTokens,
 } from "../lib/store.js";
 import { getBoss, listAllApprovalsForUser } from "../lib/boss-store.js";
+import { listAllVacationEmailLog } from "../lib/email-log.js";
 import { buildJsonExport, buildVacationsCsv, exportFilename } from "../lib/export.js";
 
 const r = new Hono<HonoVars>();
@@ -188,15 +189,23 @@ r.patch("/timezone", async (c) => {
 // ---------------------------------------------------------------------------
 r.get("/export.json", async (c) => {
   const user = authedUser(c);
-  const [categories, allowances, vacations, boss, vacationApprovals, shareTokens] =
-    await Promise.all([
-      listCategories(c.env.DB, user.id),
-      listAllAllowances(c.env.DB, user.id),
-      listAllVacations(c.env.DB, user.id),
-      getBoss(c.env.DB, user.id),
-      listAllApprovalsForUser(c.env.DB, user.id),
-      listShareTokens(c.env.DB, user.id),
-    ]);
+  const [
+    categories,
+    allowances,
+    vacations,
+    boss,
+    vacationApprovals,
+    shareTokens,
+    vacationEmailLog,
+  ] = await Promise.all([
+    listCategories(c.env.DB, user.id),
+    listAllAllowances(c.env.DB, user.id),
+    listAllVacations(c.env.DB, user.id),
+    getBoss(c.env.DB, user.id),
+    listAllApprovalsForUser(c.env.DB, user.id),
+    listShareTokens(c.env.DB, user.id),
+    listAllVacationEmailLog(c.env.DB, user.id),
+  ]);
   const payload = buildJsonExport({
     user,
     categories,
@@ -205,6 +214,7 @@ r.get("/export.json", async (c) => {
     boss,
     vacationApprovals,
     shareTokens,
+    vacationEmailLog,
     appVersion: c.env.APP_VERSION ?? "dev",
   });
   return new Response(JSON.stringify(payload, null, 2), {

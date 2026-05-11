@@ -24,7 +24,6 @@ import {
   validateVacationShape,
   vacationsInYear,
 } from "../../shared/vacation-math.js";
-import { sendVacationLifecycleEmail } from "../lib/vacation-emails.js";
 import {
   clearPendingDecisionTokens,
   createOrResetApproval,
@@ -32,7 +31,12 @@ import {
   getBossUnsubscribeToken,
   setVacationApprovalState,
 } from "../lib/boss-store.js";
-import { sendBossApprovalRequest, sendBossNotifyInvite } from "../lib/boss-emails.js";
+import {
+  dispatchBossApprovalRequest,
+  dispatchBossNotify,
+  dispatchUserLifecycle,
+} from "../lib/email-dispatch.js";
+import { listVacationEmailLog } from "../lib/email-log.js";
 import type { Allowance, BossRelationship, Category } from "../../shared/types.js";
 
 const r = new Hono<HonoVars>();
@@ -259,25 +263,21 @@ r.patch("/:id", async (c) => {
           // bumped an approved booking back to pending — same UID + bumped
           // sequence overwrites the prior CONFIRMED event in their calendar.
           if (priorApprovedVacation && boss) {
-            try {
-              const allCats = await listCategories(c.env.DB, user.id);
-              const cat = allCats.find((cc) => cc.id === priorApprovedVacation.category_id) ?? null;
-              const unsubscribeToken = await getBossUnsubscribeToken(c.env.DB, user.id);
-              if (unsubscribeToken) {
-                await sendBossNotifyInvite({
-                  env: c.env,
-                  appOrigin: new URL(c.req.url).origin,
-                  user,
-                  boss,
-                  vacation: { ...priorApprovedVacation, ical_sequence: toMail.ical_sequence },
-                  category: cat,
-                  method: "PUBLISH",
-                  status: "TENTATIVE",
-                  unsubscribeToken,
-                });
-              }
-            } catch (e) {
-              console.error("[boss] tentative-update failed", e);
+            const allCats = await listCategories(c.env.DB, user.id);
+            const cat = allCats.find((cc) => cc.id === priorApprovedVacation.category_id) ?? null;
+            const unsubscribeToken = await getBossUnsubscribeToken(c.env.DB, user.id);
+            if (unsubscribeToken) {
+              await dispatchBossNotify({
+                env: c.env,
+                appOrigin: new URL(c.req.url).origin,
+                user,
+                boss,
+                vacation: { ...priorApprovedVacation, ical_sequence: toMail.ical_sequence },
+                category: cat,
+                method: "PUBLISH",
+                status: "TENTATIVE",
+                unsubscribeToken,
+              });
             }
           }
           await mailVacation(c.env, new URL(c.req.url).origin, user, toMail, "updated", boss);
@@ -377,6 +377,158 @@ r.delete("/:id", async (c) => {
   return ok(c, { deleted: true });
 });
 
+// ---------------------------------------------------------------------------
+// Email log — read + manual resend.
+//
+// The lifecycle path (create/update/cancel/...) fires emails via waitUntil
+// with errors-only logging to stdout. Historically that meant "did the
+// manager actually get the invite?" had no answer. These two endpoints
+// close that gap:
+//
+//   GET  /:id/email-log → every send attempt for this vacation, success
+//                         or failure. Used by the UI to show "last sent"
+//                         status next to the resend button.
+//   POST /:id/resend    → manually re-send the invite to me, the manager,
+//                         or both. Performed inline (not via waitUntil) so
+//                         the response can carry the per-recipient result;
+//                         this is the user-pulled support escape hatch
+//                         after a notify-mode boss email goes missing.
+// ---------------------------------------------------------------------------
+
+r.get("/:id/email-log", async (c) => {
+  const user = authedUser(c);
+  const id = c.req.param("id");
+  // The vacation must belong to the user — otherwise return 404 same as
+  // every other read so we don't leak existence to other tenants.
+  const existing = await getVacation(c.env.DB, user.id, id);
+  if (!existing) return err(c, "NOT_FOUND", "Vacation not found.");
+  const log = await listVacationEmailLog(c.env.DB, user.id, id);
+  return ok(c, log);
+});
+
+r.post("/:id/resend", async (c) => {
+  const user = authedUser(c);
+  const id = c.req.param("id");
+  const existing = await getVacation(c.env.DB, user.id, id);
+  if (!existing) return err(c, "NOT_FOUND", "Vacation not found.");
+
+  const body = await readJson<{ to?: "self" | "boss" | "both" }>(c);
+  const to = body.to;
+  if (to !== "self" && to !== "boss" && to !== "both") {
+    return err(c, "VALIDATION_ERROR", "to must be 'self', 'boss', or 'both'.");
+  }
+  const wantSelf = to === "self" || to === "both";
+  const wantBoss = to === "boss" || to === "both";
+
+  const boss = wantBoss ? await getBoss(c.env.DB, user.id) : null;
+  if (wantBoss && (!boss || boss.consent_status !== "consented")) {
+    // Surface the specific reason so the UI can render an actionable hint
+    // ("your manager hasn't confirmed yet" / "they unsubscribed").
+    const reason = !boss
+      ? "You don't have a manager configured."
+      : boss.consent_status === "pending"
+        ? "Your manager hasn't accepted the consent email yet."
+        : "Your manager unsubscribed — add a new manager from Settings.";
+    return err(c, "VALIDATION_ERROR", reason);
+  }
+
+  const cats = await listCategories(c.env.DB, user.id);
+  const category: Category | null = cats.find((cc) => cc.id === existing.category_id) ?? null;
+  const appOrigin = new URL(c.req.url).origin;
+  // Cancelled rows → CANCEL on every kind; live rows → PUBLISH. The
+  // lifecycle name we pick is just so dispatchUserLifecycle picks the
+  // right METHOD — "cancelled" maps to CANCEL, "updated" to PUBLISH.
+  const lifecycle = existing.cancelled_at ? "cancelled" : "updated";
+  const results: import("../lib/email-dispatch.js").DispatchResult[] = [];
+
+  if (wantSelf) {
+    results.push(
+      await dispatchUserLifecycle({
+        env: c.env,
+        appOrigin,
+        user,
+        vacation: existing,
+        category,
+        lifecycle,
+        resend: true,
+      }),
+    );
+  }
+
+  if (wantBoss && boss) {
+    // Already validated consent above. unsubscribe_token is required for
+    // every boss-bound email (footer + RFC 8058 header). Pre-0008 rows
+    // could be missing it; treat that as an internal error rather than
+    // sending an email with a broken unsubscribe link.
+    const unsubscribeToken = await getBossUnsubscribeToken(c.env.DB, user.id);
+    if (!unsubscribeToken) {
+      return err(c, "INTERNAL_ERROR", "Missing unsubscribe token — contact support.");
+    }
+
+    if (boss.mode === "notify") {
+      results.push(
+        await dispatchBossNotify({
+          env: c.env,
+          appOrigin,
+          user,
+          boss,
+          vacation: existing,
+          category,
+          method: existing.cancelled_at ? "CANCEL" : "PUBLISH",
+          unsubscribeToken,
+          resend: true,
+        }),
+      );
+    } else {
+      // Approval mode. If the vacation is currently pending the manager's
+      // decision, re-mint a fresh decision token and re-send the approval-
+      // request email (the old token is invalidated by createOrResetApproval).
+      // Otherwise — already-approved or cancelled — fall back to a plain
+      // iCal copy so they get the calendar event back on their schedule.
+      if (existing.approval_state === "pending") {
+        const { approval, decision_token } = await createOrResetApproval(
+          c.env.DB,
+          existing.id,
+          boss.id,
+        );
+        const balance = await computeApprovalBalance(c.env, user, existing, category);
+        results.push(
+          await dispatchBossApprovalRequest({
+            env: c.env,
+            appOrigin,
+            user,
+            boss,
+            vacation: existing,
+            category,
+            approval,
+            decisionToken: decision_token,
+            balance,
+            unsubscribeToken,
+            resend: true,
+          }),
+        );
+      } else {
+        results.push(
+          await dispatchBossNotify({
+            env: c.env,
+            appOrigin,
+            user,
+            boss,
+            vacation: existing,
+            category,
+            method: existing.cancelled_at ? "CANCEL" : "PUBLISH",
+            unsubscribeToken,
+            resend: true,
+          }),
+        );
+      }
+    }
+  }
+
+  const log = await listVacationEmailLog(c.env.DB, user.id, id);
+  return ok(c, { results, log });
+});
+
 /**
  * Look up the vacation's category and fan out to the email helper. Pulled
  * up here so each route handler is a one-liner.
@@ -388,8 +540,9 @@ r.delete("/:id", async (c) => {
  *   - approval mode + already-decided → no extra email; the approval-decide
  *     route handles the post-decision boss copy.
  *
- * Failures in boss-side sends are caught individually so a Mailgun blip on
- * the boss email doesn't take down the user's own iCal.
+ * Every send (success or failure) is logged via the dispatcher helpers, so
+ * a Mailgun blip on the boss email no longer disappears into stdout — it
+ * shows up on the vacation's email-log endpoint and powers the resend UI.
  */
 async function mailVacation(
   env: import("../types.js").Env,
@@ -402,20 +555,15 @@ async function mailVacation(
   const cats = await listCategories(env.DB, user.id);
   const category: Category | null = cats.find((c) => c.id === vacation.category_id) ?? null;
 
-  // 1. User-side iCal — uses TENTATIVE for pending automatically.
-  if (user.email && user.email_verified_at) {
-    try {
-      await sendVacationLifecycleEmail(env, appOrigin, user, vacation, category, lifecycle);
-    } catch (e) {
-      console.error("[vacation-emails] user-side send failed:", (e as Error).message);
-    }
-  }
+  // 1. User-side iCal — uses TENTATIVE for pending automatically. Dispatcher
+  // handles the email/verified gate and logs success or failure.
+  await dispatchUserLifecycle({ env, appOrigin, user, vacation, category, lifecycle });
 
   if (!boss || boss.consent_status !== "consented") return;
 
   // Every boss-bound email carries the manager's per-relationship
   // unsubscribe URL (footer + RFC 8058 List-Unsubscribe header). Fetched
-  // once here and passed to whichever sendBoss* helper fires below.
+  // once here and passed to whichever dispatcher fires below.
   const unsubscribeToken = await getBossUnsubscribeToken(env.DB, user.id);
   if (!unsubscribeToken) {
     // Defence-in-depth — pre-0008 rows that somehow missed the backfill.
@@ -432,20 +580,16 @@ async function mailVacation(
   // mirroring a pending one to the boss in notify mode — but pending only
   // exists in approval mode, so this is more a guardrail).
   if (boss.mode === "notify") {
-    try {
-      await sendBossNotifyInvite({
-        env,
-        appOrigin,
-        user,
-        boss,
-        vacation,
-        category,
-        method,
-        unsubscribeToken,
-      });
-    } catch (e) {
-      console.error("[boss] notify invite failed:", (e as Error).message);
-    }
+    await dispatchBossNotify({
+      env,
+      appOrigin,
+      user,
+      boss,
+      vacation,
+      category,
+      method,
+      unsubscribeToken,
+    });
     return;
   }
 
@@ -457,45 +601,32 @@ async function mailVacation(
       // Boss only ever sees the calendar event if they previously approved
       // it. Send a CANCEL — calendar clients no-op on UIDs they've never
       // seen, so this is safe even if they never had it.
-      try {
-        await sendBossNotifyInvite({
-          env,
-          appOrigin,
-          user,
-          boss,
-          vacation,
-          category,
-          method: "CANCEL",
-          unsubscribeToken,
-        });
-      } catch (e) {
-        console.error("[boss] approval-mode cancel failed:", (e as Error).message);
-      }
+      await dispatchBossNotify({
+        env,
+        appOrigin,
+        user,
+        boss,
+        vacation,
+        category,
+        method: "CANCEL",
+        unsubscribeToken,
+      });
       return;
     }
     if (vacation.approval_state !== "pending") return;
 
     // Mint (or reset) an approval row + token, compute the balance preview,
-    // and send the request.
+    // and send the request. The mint itself can throw (D1 hiccup) — if it
+    // does, log it as a boss approval_request failure so support has a
+    // breadcrumb, then return.
     try {
       const { approval, decision_token } = await createOrResetApproval(
         env.DB,
         vacation.id,
         boss.id,
       );
-      const year = Number(vacation.start_date.slice(0, 4));
-      const [allowances, vacations] = await Promise.all([
-        listAllowances(env.DB, user.id, year),
-        listVacationsInYear(env.DB, user.id, year),
-      ]);
-      const allowance = category ? allowances.find((a) => a.category_id === category.id) : null;
-      const filtered = vacationsInYear(year, vacations).filter(
-        (v) => category && v.category_id === category.id,
-      );
-      const usage = category
-        ? categoryUsage(category, allowance ?? null, filtered, new Date(), year, user.timezone)
-        : { used_days: 0, total_days: 0, remaining_days: 0 };
-      await sendBossApprovalRequest({
+      const balance = await computeApprovalBalance(env, user, vacation, category);
+      await dispatchBossApprovalRequest({
         env,
         appOrigin,
         user,
@@ -504,17 +635,42 @@ async function mailVacation(
         category,
         approval,
         decisionToken: decision_token,
-        balance: {
-          used_days: usage.used_days,
-          total_days: usage.total_days,
-          remaining_days: usage.remaining_days,
-        },
+        balance,
         unsubscribeToken,
       });
     } catch (e) {
-      console.error("[boss] approval request failed:", (e as Error).message);
+      console.error("[boss] approval mint failed:", (e as Error).message);
     }
   }
+}
+
+/**
+ * Compute the post-decision balance preview the boss sees on the approval
+ * page. Lifted out of mailVacation so the resend endpoint can reuse it.
+ */
+async function computeApprovalBalance(
+  env: import("../types.js").Env,
+  user: import("../../shared/types.js").User,
+  vacation: import("../../shared/types.js").Vacation,
+  category: Category | null,
+): Promise<{ used_days: number; total_days: number; remaining_days: number }> {
+  const year = Number(vacation.start_date.slice(0, 4));
+  const [allowances, vacations] = await Promise.all([
+    listAllowances(env.DB, user.id, year),
+    listVacationsInYear(env.DB, user.id, year),
+  ]);
+  const allowance = category ? allowances.find((a) => a.category_id === category.id) : null;
+  const filtered = vacationsInYear(year, vacations).filter(
+    (v) => category && v.category_id === category.id,
+  );
+  const usage = category
+    ? categoryUsage(category, allowance ?? null, filtered, new Date(), year, user.timezone)
+    : { used_days: 0, total_days: 0, remaining_days: 0 };
+  return {
+    used_days: usage.used_days,
+    total_days: usage.total_days,
+    remaining_days: usage.remaining_days,
+  };
 }
 
 export default r;

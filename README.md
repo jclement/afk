@@ -103,6 +103,8 @@ programmatic clients aren't supported (it's a personal app).
 | `GET`                         | `/api/v1/vacations/summary/:year`                   | Year summary (widgets + list)                              |
 | `POST` `PATCH`                | `/api/v1/vacations[/:id]`                           | Vacation CRUD                                              |
 | `POST`                        | `/api/v1/vacations/:id/cancel`                      | Soft-cancel a vacation                                     |
+| `GET`                         | `/api/v1/vacations/:id/email-log`                   | Per-vacation email send audit (success + failure rows)     |
+| `POST`                        | `/api/v1/vacations/:id/resend`                      | Manually resend the invite to self / manager / both        |
 | `GET` `POST` `DELETE`         | `/api/v1/passkeys[/:id]`                            | Manage passkeys                                            |
 | `GET` `POST` `DELETE`         | `/api/v1/ical-tokens[/:id]`                         | Manage iCal feed tokens                                    |
 | `GET` `POST` `DELETE`         | `/api/v1/share-tokens[/:id]`                        | Manage read-only dashboard share links                     |

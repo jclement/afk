@@ -4,7 +4,7 @@
  * same actions, different shape.
  */
 
-import { Trash2, Ban, Pencil, RotateCcw } from "lucide-react";
+import { Trash2, Ban, Pencil, RotateCcw, Mail } from "lucide-react";
 import type { Category, Vacation } from "@shared/types";
 import { describeVacation, vacationDayCost } from "@shared/vacation-math";
 
@@ -18,6 +18,10 @@ interface Props {
   onUncancel?: (id: string) => void;
   onDelete?: (id: string) => void;
   onEdit?: (v: Vacation) => void;
+  /** Open the resend-invite modal for this vacation. Optional — passing
+   *  undefined hides the action button entirely (e.g. on the public share
+   *  view, which has no notion of "your inbox"). */
+  onResend?: (v: Vacation) => void;
   /** When true the list hides `internal_desc` from the Note column. The
    *  share API already strips it server-side, but the view also defends. */
   hideInternalDesc?: boolean;
@@ -81,6 +85,7 @@ function VacationRow({
   onUncancel,
   onDelete,
   onEdit,
+  onResend,
   hideInternalDesc,
 }: { v: VacationWithCategory } & Omit<Props, "vacations">) {
   const cost = vacationDayCost(v);
@@ -108,6 +113,7 @@ function VacationRow({
             onCancel={onCancel}
             onUncancel={onUncancel}
             onDelete={onDelete}
+            onResend={onResend}
           />
         </td>
       )}
@@ -121,6 +127,7 @@ function VacationCard({
   onUncancel,
   onDelete,
   onEdit,
+  onResend,
   hideInternalDesc,
 }: { v: VacationWithCategory } & Omit<Props, "vacations">) {
   const cost = vacationDayCost(v);
@@ -149,6 +156,7 @@ function VacationCard({
             onCancel={onCancel}
             onUncancel={onUncancel}
             onDelete={onDelete}
+            onResend={onResend}
           />
         </div>
       )}
@@ -192,10 +200,25 @@ function ActionButtons({
   onCancel,
   onUncancel,
   onDelete,
+  onResend,
 }: { v: VacationWithCategory } & Omit<Props, "vacations">) {
   const isCancelled = !!v.cancelled_at;
   return (
     <div className="inline-flex gap-1">
+      {onResend && (
+        // Available regardless of cancelled state — resending a CANCEL is
+        // exactly the recovery path for "the manager still has it on their
+        // calendar after I cancelled."
+        <button
+          type="button"
+          onClick={() => onResend(v)}
+          title="Resend invite"
+          aria-label="Resend invite"
+          className="p-1 rounded hover:bg-hover"
+        >
+          <Mail className="w-4 h-4" />
+        </button>
+      )}
       {!isCancelled && (
         <>
           <button

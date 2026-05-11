@@ -22,6 +22,7 @@ import type {
   User,
   Vacation,
   VacationApproval,
+  VacationEmailLog,
 } from "../../shared/types.js";
 import { vacationDayCost } from "../../shared/vacation-math.js";
 
@@ -69,6 +70,13 @@ export interface JsonExport {
    * so a migrating user has a record of which links existed.
    */
   share_tokens: Array<Pick<ShareToken, "id" | "scope" | "label" | "created_at" | "last_viewed_at">>;
+  /**
+   * Per-vacation email delivery audit. One row per send attempt — automatic
+   * lifecycle sends AND manual /resend clicks. No credentials, just the
+   * Mailgun message id and an error string when applicable. Lets a
+   * migrating user keep proof-of-send for past notifications.
+   */
+  vacation_email_log: VacationEmailLog[];
 }
 
 export function buildJsonExport(input: {
@@ -79,6 +87,7 @@ export function buildJsonExport(input: {
   boss: BossRelationship | null;
   vacationApprovals: VacationApproval[];
   shareTokens: ShareToken[];
+  vacationEmailLog: VacationEmailLog[];
   appVersion: string;
   now?: Date;
 }): JsonExport {
@@ -111,6 +120,7 @@ export function buildJsonExport(input: {
       created_at: t.created_at,
       last_viewed_at: t.last_viewed_at,
     })),
+    vacation_email_log: input.vacationEmailLog,
   };
 }
 

@@ -17,6 +17,7 @@ import { currentYearInTimezone } from "@shared/vacation-math";
 import { CategoryWidget } from "../components/CategoryWidget";
 import { VacationList } from "../components/VacationList";
 import { BookingModal } from "../components/BookingModal";
+import { ResendInviteModal } from "../components/ResendInviteModal";
 import type { Vacation } from "@shared/types";
 
 export const Route = createFileRoute("/")({
@@ -48,6 +49,7 @@ function DashboardPage() {
 
   const [bookingOpen, setBookingOpen] = useState(false);
   const [editing, setEditing] = useState<Vacation | null>(null);
+  const [resending, setResending] = useState<Vacation | null>(null);
   const [recoveryNudge, setRecoveryNudge] = useState(search.recovery === 1);
 
   function setYear(next: number) {
@@ -198,6 +200,7 @@ function DashboardPage() {
             setEditing(v);
             setBookingOpen(true);
           }}
+          onResend={(v) => setResending(v)}
         />
       )}
 
@@ -206,6 +209,11 @@ function DashboardPage() {
         year={year}
         editing={editing}
         onClose={() => setBookingOpen(false)}
+      />
+      <ResendInviteModal
+        open={!!resending}
+        vacation={resending}
+        onClose={() => setResending(null)}
       />
     </div>
   );
